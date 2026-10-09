@@ -194,16 +194,27 @@ alternate path 404s. Minting is console-only:
 
 1. https://cloud.digitalocean.com/model-studio/manage-keys → create `hanzi-miner-app`
 2. Scope it to **only the models the app calls** (`qwen3.8-max`), not "All models"
-3. Hand it to the app without recording it anywhere:
+3. Hand it to the app. **One command** — it prompts for the key itself:
+
+```bash
+~/dev/hanzi-miner/.venv/bin/python ~/dev/hanzi-miner/scripts/set_app_key.py
+```
+
+The script prompts with hidden input, so nothing lands in `~/.zsh_history` and
+there is no shell quoting to get wrong.
+
+Do **not** do it this way — it is a trap:
 
 ```bash
 read -rs DO_INFERENCE_KEY && export DO_INFERENCE_KEY
-python scripts/set_app_key.py <app-id>
-unset DO_INFERENCE_KEY
+python scripts/set_app_key.py
 ```
 
-`read -rs` hides the input and keeps the value out of `~/.zsh_history` (a plain
-`export KEY=value` would record it).
+Two problems. `read` consumes the **next pasted line** as its input, because it
+reads from the same stdin the paste is going into — so pasting those two lines
+together sets the "key" to the text `python scripts/set_app_key.py`. And `python`
+is not on `PATH` on macOS (`python3` is), so the second line fails anyway. The
+script prompts from inside itself precisely so this cannot happen.
 
 `set_app_key.py` fingerprints the key, **tests it against the inference endpoint
 before repointing the app** (so a bad key can't take down a working deployment),

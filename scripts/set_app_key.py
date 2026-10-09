@@ -3,30 +3,39 @@
 DigitalOcean retired programmatic creation of model access keys (the create
 endpoint returns HTTP 410: "Creating model API keys through this endpoint is
 retired. Go to manage page in the control panel"). So the key has to be minted in
-the browser. This script does everything after that, and is designed so the secret
-never enters a chat transcript, a file, or your shell history.
+the browser. This script does everything after that.
 
-STEP 1 — in the DigitalOcean console, create the key:
+STEP 1 - in the DigitalOcean console, create the key:
 
     https://cloud.digitalocean.com/model-studio/manage-keys
 
-    Name:  hanzi-miner-app
-    Models: select ONLY what the app calls (qwen3.8-max) rather than "All models".
-            Least privilege: if the key leaks, it can't reach your other models.
-    VPC:   leave unrestricted for now. The app has no explicit VPC binding, so a
-           VPC-scoped key may simply 403. Add that later — see the note below.
+    Name:   hanzi-miner-app
+    Models: select ONLY what the app calls (qwen3.8-max), not "All models".
+            Least privilege: a leaked key then cannot reach your other models.
+    VPC:    leave unrestricted for now. The app has no explicit VPC binding, so a
+            VPC-scoped key may simply 403.
     Copy the key when it is shown; it is displayed exactly once.
 
-STEP 2 — in your terminal, hand it to this script without recording it:
+STEP 2 - ONE command, no shell gymnastics:
 
-    read -rs DO_INFERENCE_KEY && export DO_INFERENCE_KEY
-    python scripts/set_app_key.py <app-id>
-    unset DO_INFERENCE_KEY
+    ~/dev/hanzi-miner/.venv/bin/python ~/dev/hanzi-miner/scripts/set_app_key.py
 
-`read -rs` keeps the value out of shell history (a plain `export KEY=...` lands in
-~/.zsh_history). The script prints only a sha256 fingerprint, and tests the key
-against the inference endpoint BEFORE repointing the app, so a bad key cannot take
-down the running deployment.
+It PROMPTS for the key (hidden input, nothing echoed, nothing in your shell
+history). Do not pass the key as an argument and do not `export` it first: both
+record it where you don't want it.
+
+WHY IT PROMPTS INSTEAD OF USING `read -rs` FROM THE SHELL: the first version of
+this instruction was two lines - `read -rs KEY && export KEY`, then the command.
+Pasting them together makes `read` swallow the SECOND line as the key, because it
+reads from the very stdin the paste is being typed into. (It also silently set the
+"key" to the text of the next command.) Prompting from inside the script removes
+the failure mode for good.
+
+For automation (CI, a scheduler) DO_INFERENCE_KEY is still honoured when it is
+already set in the environment; the prompt only appears when it is absent.
+
+Safety property: the key is tested against the inference endpoint BEFORE the app is
+repointed, so a bad key cannot take down a running deployment.
 
 Do NOT delete the old doo_... credential: Hermes uses the same one.
 """
@@ -41,20 +50,33 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import configure_app  # noqa: E402  (one place owns the spec-edit logic)
 from rotate_app_key import fingerprint, probe  # noqa: E402
 
-APP_ID = "e5d0d85c-5824-4b44-82d8-a541314b7989"
+DEFAULT_APP_ID = "e5d0d85c-5824-4b44-82d8-a541314b7989"
+
+
+def get_key() -> str:
+    """Prefer the environment (automation); otherwise prompt without echoing."""
+    key = os.environ.get("DO_INFERENCE_KEY", "").strip()
+    if key:
+        print("using DO_INFERENCE_KEY from the environment")
+        return key
+
+    import getpass
+
+    print("Paste the model access key and press Enter (input is hidden):", flush=True)
+    return getpass.getpass("key: ").strip()
 
 
 def main(app_id: str) -> int:
-    key = os.environ.get("DO_INFERENCE_KEY", "").strip()
-    if not key:
-        print("DO_INFERENCE_KEY is not set.\n")
-        print(__doc__)
-        return 2
     if not os.environ.get("DIGITALOCEAN_API_TOKEN", "").strip():
         print("DIGITALOCEAN_API_TOKEN is not set (needed to edit the app spec).")
         return 2
 
-    print(f"new key: {fingerprint(key)}")
+    key = get_key()
+    if not key:
+        print("no key supplied - nothing changed.")
+        return 2
+
+    print(f"\nnew key: {fingerprint(key)}")
 
     print("testing it against the inference endpoint (app untouched so far) ...")
     ok, why = probe(key)
@@ -70,14 +92,17 @@ def main(app_id: str) -> int:
     dep = out.get("app", {}).get("pending_deployment", {})
     print(f"  app updated; deployment {dep.get('id')}")
 
+    live = out.get("app", {}).get("live_url", "<live-url>")
     print("\nNext:")
-    print("  1. unset DO_INFERENCE_KEY in your shell")
-    print(f"  2. wait ~2 min, then: python scripts/verify_live.py <live-url>")
-    print("  3. keep the old doo_... credential — Hermes still uses it")
+    print("  1. wait ~2 minutes for the redeploy")
+    print(f"  2. python3 scripts/verify_live.py {live}")
+    print("  3. keep the old doo_... credential - Hermes still uses it")
     print("  4. revoke 'hanzi-miner-app' in the console whenever you like;")
     print("     doing so cannot affect Hermes")
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv[1] if len(sys.argv) > 1 else APP_ID))
+    if len(sys.argv) > 1 and sys.argv[1] in ("-h", "--help"):
+        raise SystemExit(__doc__)
+    raise SystemExit(main(sys.argv[1] if len(sys.argv) > 1 else DEFAULT_APP_ID))

@@ -1,5 +1,7 @@
 # Hanzi Miner
 
+**Live:** https://hanzi-miner-l6ykh.ondigitalocean.app
+
 Paste Chinese text → get **i+1 flashcards**: sentences where you understand every
 word except exactly one. That single unknown word is guessable from context,
 which is the condition under which vocabulary actually sticks (Krashen's

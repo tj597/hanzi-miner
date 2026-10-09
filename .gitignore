@@ -7,3 +7,6 @@ __pycache__/
 # Large dictionary — fetch with scripts/fetch_data.sh, don't commit.
 data/cedict.txt
 data/cedict.txt.gz
+
+# Live App Platform spec snapshot (contains an encrypted secret blob).
+.do/app.live.yaml

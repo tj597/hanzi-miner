@@ -5,12 +5,19 @@ word except exactly one. That single unknown word is guessable from context,
 which is the condition under which vocabulary actually sticks (Krashen's
 comprehensible input).
 
-Clipboard in, Anki deck out. No app to install, no account.
+Paste Chinese, mine the sentences worth learning, review them on a schedule, and
+generate fresh dialogues built from the words you keep forgetting.
+
+**Mine** → **Review** → **Library** → **Generate**. No app to install, no account.
 
 ```
 paste dialogue →  clean + segment → keep units with exactly 1 unknown word
-              → dedupe (one card per word) → rank → .apkg
+              → save to the word bank → review on an SRS schedule
+              → generate a new dialogue around your weakest words → repeat
 ```
+
+The Anki `.apkg` export is still there, but it is no longer the only way out —
+the deck lives in the app now.
 
 ## Quick start
 
@@ -19,10 +26,18 @@ git clone <this repo> && cd hanzi-miner
 ./scripts/fetch_data.sh          # downloads CC-CEDICT + HSK lists (once)
 python3 -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
+
+createdb hanzi                   # PostgreSQL; only needed for save/review/generate
+export DATABASE_URL=postgresql://localhost/hanzi
+export DO_INFERENCE_KEY=doo_v1_...   # Model Access Key; only needed for Generate
+
 python app.py                    # http://127.0.0.1:8080
 ```
 
-Or use it from the terminal:
+Without `DATABASE_URL` you still get mining and Anki export; the other tabs say so
+instead of failing silently. Without `DO_INFERENCE_KEY` only the Generate tab is off.
+
+Or use the miner from the terminal:
 
 ```bash
 python cli.py samples/dialogue_office.txt --level 3 --mode dialogue
@@ -46,6 +61,45 @@ cat article.txt | python cli.py - --level 4 --mode prose --max-unknown 1
 7. **Enrich + export.** CC-CEDICT definitions, pypinyin tone-marked readings, and
    a ready-to-import Anki `.apkg` (no add-ons needed). Re-imports update the same
    deck instead of duplicating cards.
+
+## Review, library and generation
+
+**Save** puts a mining result in the database: the source text, one row per word,
+and the sentence each word appeared in. Words are upserted — mining a word you
+already have bumps a counter, it never duplicates the row or disturbs its schedule.
+
+**Review** runs a deliberately small SRS. Every word has a box (0–6) and a due
+date. *Good* promotes the box and pushes the date out (1, 2, 4, 8, 16, 32 days);
+*Again* resets to box 0, so a lapsed word comes straight back; *Easy* jumps two
+boxes. The front of the card shows the sentence with the target word masked, so you
+recall it from context rather than recognising it in isolation.
+
+**Library** is the word bank (filter by all / due / new / learning / known, search
+by word, pinyin or meaning, each row showing its context sentence) plus every text
+you've saved or generated, expandable in place.
+
+**Generate** writes a brand-new dialogue around your weakest and most overdue words.
+It picks them from the bank, asks the model for a dialogue that uses all of them at
+HSK level N, mines the result, and files it in the library — so the new words land in
+your review queue in one click.
+
+### Generation needed two defences (learned the hard way)
+
+The first version shipped garbage. `qwen3.8-max` is a *reasoning* model, and with
+only a "no commentary" instruction it wrote pages of English self-debate about HSK
+levels, interleaved with Chinese drafts. Every line containing a Chinese character
+survived naive parsing, so the app stored the model's monologue as a dialogue — and
+the tests passed, because the target words really were in there somewhere.
+
+Two fixes, both in `generate.py`:
+1. Ask for the output wrapped in `<dialogue>` tags and parse only inside them.
+2. Accept a line **only** when its speaker label is exactly one of the two names
+   requested **and** the turn contains no Latin letters or ASCII digits. Chinese
+   dialogue has neither, and this kills every reasoning line.
+
+`scripts/model_probe.py` re-runs the comparison across candidate models. Run it
+before changing the default: the failure mode is not an error, it is a model that
+quietly emits its chain of thought.
 
 ## The part that actually matters: your known-set
 
@@ -108,7 +162,7 @@ python cli.py PATH --level {1..6} --mode {dialogue,prose}
 - [ ] Photo input — iOS Shortcut (on-device Live Text) → same `/api/mine`
 - [ ] `.srt` ingestion with subtitle-line reassembly
 - [ ] Sentence audio via TTS (DigitalOcean serverless inference) stored in Spaces
-- [ ] read back which words you've since learned → auto-advance difficulty
+- [ ] Export the word bank back to Anki on demand (currently only per-text export)
 
 ## Credits
 

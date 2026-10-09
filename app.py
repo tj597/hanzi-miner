@@ -1,85 +1,257 @@
-"""Hanzi Miner — paste Chinese, get i+1 flashcards.
+"""Hanzi Miner — paste Chinese, mine i+1 cards, review them, generate new ones.
 
-Flask app with two endpoints:
-  POST /api/mine   {text, mode, level, extra_known, max_unknown} -> {cards, stats}
-  POST /api/deck   same body -> .apkg download
+Endpoints
+  GET  /                    the app (tabs: Mine / Review / Library / Generate)
+  GET  /healthz             cheap liveness probe (no DB, no dictionary loading)
+  POST /api/mine            {text, mode, level, max_unknown} -> {cards, stats}
+  POST /api/deck            same body -> .apkg download
+  POST /api/save            {text, cards, mode, level, title} -> persist to the bank
+  GET  /api/stats           counts for the header
+  GET  /api/words           ?filter=all|due|new|learning|known&q=
+  GET  /api/review          ?limit=20 -> the review queue
+  POST /api/review          {word, result: again|good|easy}
+  GET  /api/library         pasted/generated texts
+  GET  /api/texts/<id>      one text with its mined targets
+  POST /api/generate        {count, level, topic, turns, save} -> new dialogue
 
-Run locally:   python app.py            (http://127.0.0.1:8080)
-Deploy:        App Platform; it runs `gunicorn app:app --bind 0.0.0.0:$PORT`
+Run locally:  python app.py      Deploy: gunicorn app:app (see .do/app.yaml)
 """
 
 from __future__ import annotations
 
+import io
 import os
 
 from flask import Flask, jsonify, render_template, request, send_file
 
+import db
 import deck as deck_mod
+import generate as gen_mod
 from known import build_known
 from miner import add_pinyin, mine
 
 app = Flask(__name__)
 
 
-def _params(payload: dict) -> dict:
-    return dict(
-        text=payload.get("text", "") or "",
-        known=build_known(
-            level=int(payload.get("level", 2) or 2),
-            extra=payload.get("extra_known", "") or "",
-        ),
-        mode="dialogue" if payload.get("mode", "dialogue") == "dialogue" else "prose",
-        max_unknown=int(payload.get("max_unknown", 1) or 1),
-        window=int(payload.get("window", 2) or 2),
-    )
-
-
-def _run(payload: dict) -> dict:
-    r = _params(payload)
-    if not r["text"].strip():
+def _mine(payload: dict) -> dict:
+    text = (payload.get("text") or "").strip()
+    level = int(payload.get("level", 2) or 2)
+    if not text:
         return {"cards": [], "stats": {"lines": 0, "units": 0, "candidates": 0, "mined": 0}}
     result = mine(
-        text=r["text"],
-        known=r["known"],
-        mode=r["mode"],
-        max_unknown=r["max_unknown"],
-        window=r["window"],
+        text=text,
+        known=build_known(level=level, extra=payload.get("extra_known", "") or ""),
+        mode="prose" if payload.get("mode") == "prose" else "dialogue",
+        max_unknown=int(payload.get("max_unknown", 1) or 1),
+        window=int(payload.get("window", 2) or 2),
     )
     result["cards"] = add_pinyin(result["cards"])
     return result
 
 
+def _no_db(what: str):
+    return (
+        jsonify({"error": f"{what} needs a database", "detail": "DATABASE_URL is not configured"}),
+        503,
+    )
+
+
+# ------------------------------------------------------------------ the app
+
+
 @app.get("/")
 def index():
-    return render_template("index.html")
+    return render_template(
+        "index.html",
+        can_generate=gen_mod.available(),
+        has_db=db.available(),
+        model=gen_mod.MODEL,
+    )
 
 
 @app.get("/healthz")
 def healthz():
+    """Deliberately trivial: must not touch the dictionary, jieba, or the DB."""
     return "ok", 200
+
+
+# ------------------------------------------------------------------ mining
 
 
 @app.post("/api/mine")
 def api_mine():
-    return jsonify(_run(request.get_json(force=True, silent=True) or {}))
+    return jsonify(_mine(request.get_json(force=True, silent=True) or {}))
 
 
 @app.post("/api/deck")
 def api_deck():
     payload = request.get_json(force=True, silent=True) or {}
-    result = _run(payload)
+    result = _mine(payload)
     if not result["cards"]:
         return jsonify({"error": "no cards to export", "stats": result["stats"]}), 400
     data = deck_mod.build_deck(result["cards"])
     name = (payload.get("deck_name") or "Hanzi Miner").strip() or "Hanzi Miner"
     return send_file(
-        __import__("io").BytesIO(data),
+        io.BytesIO(data),
         mimetype="application/apkg",
         as_attachment=True,
         download_name=f"{name}.apkg",
     )
 
 
+@app.post("/api/save")
+def api_save():
+    if not db.available():
+        return _no_db("Saving")
+    payload = request.get_json(force=True, silent=True) or {}
+    cards = payload.get("cards") or []
+    text = (payload.get("text") or "").strip()
+    if not text or not cards:
+        return jsonify({"error": "nothing to save — mine some cards first"}), 400
+    try:
+        saved = db.save_mined(
+            text=text,
+            cards=cards,
+            mode=payload.get("mode", "dialogue"),
+            level=int(payload.get("level", 2) or 2),
+            title=payload.get("title"),
+        )
+    except Exception as exc:  # surface DB errors rather than a bare 500
+        return jsonify({"error": "could not save", "detail": str(exc)[:300]}), 500
+    return jsonify({**saved, "stats": db.stats()})
+
+
+# ------------------------------------------------------------------ the bank
+
+
+@app.get("/api/stats")
+def api_stats():
+    if not db.available():
+        return jsonify({"error": "no database"}), 503
+    try:
+        return jsonify(db.stats())
+    except Exception as exc:
+        return jsonify({"error": str(exc)[:300]}), 500
+
+
+@app.get("/api/words")
+def api_words():
+    if not db.available():
+        return _no_db("The word bank")
+    try:
+        return jsonify(
+            {
+                "words": db.list_words(
+                    filter=request.args.get("filter", "all"),
+                    q=request.args.get("q", ""),
+                    limit=int(request.args.get("limit", 200)),
+                )
+            }
+        )
+    except Exception as exc:
+        return jsonify({"error": str(exc)[:300]}), 500
+
+
+@app.get("/api/library")
+def api_library():
+    if not db.available():
+        return _no_db("The library")
+    try:
+        return jsonify({"texts": db.list_texts(), "stats": db.stats()})
+    except Exception as exc:
+        return jsonify({"error": str(exc)[:300]}), 500
+
+
+@app.get("/api/texts/<int:text_id>")
+def api_text(text_id: int):
+    if not db.available():
+        return _no_db("The library")
+    t = db.get_text(text_id)
+    if not t:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(t)
+
+
+# ------------------------------------------------------------------ review
+
+
+@app.get("/api/review")
+def api_review_queue():
+    if not db.available():
+        return _no_db("Review")
+    try:
+        return jsonify({"queue": db.review_queue(limit=int(request.args.get("limit", 20)))})
+    except Exception as exc:
+        return jsonify({"error": str(exc)[:300]}), 500
+
+
+@app.post("/api/review")
+def api_review():
+    if not db.available():
+        return _no_db("Review")
+    payload = request.get_json(force=True, silent=True) or {}
+    result = payload.get("result", "good")
+    if result not in ("again", "good", "easy"):
+        return jsonify({"error": "result must be again|good|easy"}), 400
+    try:
+        out = db.review_word(payload.get("word", ""), result)
+    except Exception as exc:
+        return jsonify({"error": str(exc)[:300]}), 500
+    if out.get("error"):
+        return jsonify(out), 404
+    return jsonify({**out, "stats": db.stats()})
+
+
+# ------------------------------------------------------------------ generate
+
+
+@app.post("/api/generate")
+def api_generate():
+    payload = request.get_json(force=True, silent=True) or {}
+    if not gen_mod.available():
+        return jsonify({"error": "Dialogue generation needs DO_INFERENCE_KEY on the server"}), 503
+
+    level = int(payload.get("level", 3) or 3)
+    words = payload.get("words") or []
+    if not words and db.available():
+        try:
+            words = db.pick_words(n=int(payload.get("count", 15) or 15))
+        except Exception as exc:
+            return jsonify({"error": f"could not read the word bank: {exc}"[:300]}), 500
+    if not words:
+        return jsonify({"error": "no words to build a dialogue from — mine and save some first"}), 400
+
+    try:
+        out = gen_mod.generate_dialogue(
+            words=words,
+            level=level,
+            topic=payload.get("topic", "") or "",
+            turns=int(payload.get("turns", 10) or 10),
+        )
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)[:400]}), 502
+
+    # One click: a generated dialogue lands in the library with its words mined,
+    # so it enters the review queue immediately.
+    saved = None
+    mined = None
+    if payload.get("save", True) and db.available():
+        mined = _mine({"text": out["body"], "mode": "dialogue", "level": level})
+        try:
+            saved = db.save_mined(
+                text=out["body"],
+                cards=mined["cards"],
+                mode="dialogue",
+                level=level,
+                title=out["title"],
+                source="generated",
+            )
+            saved["stats"] = db.stats()
+        except Exception as exc:
+            saved = {"error": str(exc)[:300]}
+
+    return jsonify({"dialogue": out, "mined": mined, "saved": saved})
+
+
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host="127.0.0.1", port=port, debug=True)
+    app.run(host="127.0.0.1", port=int(os.environ.get("PORT", 8080)), debug=True)

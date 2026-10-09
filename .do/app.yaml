@@ -1,11 +1,25 @@
-# DigitalOcean App Platform spec.
-#   doctl apps create --spec .do/app.yaml     (or: update --spec for changes)
+# DigitalOcean App Platform spec — CREATION TEMPLATE.
+#
+#   doctl apps create --spec .do/app.yaml
 #
 # Source is a public git clone URL, NOT the `github:` source. The `github:`
 # source requires DigitalOcean's GitHub app to be authorised for the repo via a
 # browser OAuth flow; the generic `git:` source needs no grant as long as the
 # repository is public. Trade-off: no deploy-on-push for generic git sources —
 # redeploy with `doctl apps create-deployment <app-id>`.
+#
+# !! DO_INFERENCE_KEY IS DELIBERATELY ABSENT !!
+# It is a SECRET, so it must never live in git. Once it exists on the live app,
+# App Platform stores it as an encrypted `EV[...]` blob inside the live spec, and
+# `doctl apps update --spec .do/app.yaml` would WIPE it. For any change after the
+# first deploy, start from the live spec instead:
+#
+#   doctl apps spec get <app-id> > .do/app.live.yaml   # gitignored
+#   $EDITOR .do/app.live.yaml
+#   doctl apps update <app-id> --spec .do/app.live.yaml
+#
+# scripts/configure_app.py does the first-time wiring of the database binding and
+# the inference key without ever printing the key.
 name: hanzi-miner
 region: tor
 services:
@@ -20,9 +34,26 @@ services:
     # cedict.txt is ~10 MB and gitignored, so fetch it during the build.
     # The Python buildpack runs `pip install -r requirements.txt` on its own.
     build_command: bash scripts/fetch_data.sh
-    run_command: gunicorn app:app --bind 0.0.0.0:8080 --workers 1 --threads 4 --timeout 120
+    # timeout must exceed the dialogue-generation request timeout (150s).
+    run_command: gunicorn app:app --bind 0.0.0.0:8080 --workers 1 --threads 4 --timeout 180
     health_check:
       http_path: /healthz
     envs:
       - key: PYTHONUNBUFFERED
         value: "1"
+      # Bound to the dev database declared below — no connection secret to manage.
+      - key: DATABASE_URL
+        value: ${db.DATABASE_URL}
+        scope: RUN_TIME
+      # Served by the bound database; optional to pin.
+      # - key: DO_INFERENCE_MODEL
+      #   value: qwen3.8-max
+      #   scope: RUN_TIME
+    # The SECRET (doo_v1_...) is set out of band by scripts/configure_app.py.
+
+databases:
+  # App Platform "development" database: 512 MiB PostgreSQL, $7/mo, single node,
+  # no automated backups and no HA. Right for one user, wrong for anything real.
+  - name: db
+    engine: PG
+    production: false

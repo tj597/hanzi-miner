@@ -3,164 +3,422 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Hanzi Miner — i+1 sentence miner</title>
+<title>Hanzi Miner</title>
 <style>
   :root{
     --bg:#0f1216; --panel:#171b21; --line:#2a313a; --fg:#e6e9ee;
-    --muted:#8b95a3; --accent:#e2604a; --ok:#4ea87a;
+    --muted:#8b95a3; --accent:#e2604a; --ok:#4ea87a; --warn:#d8a642;
   }
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--fg);
        font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
-  header{padding:22px 20px 8px;max-width:860px;margin:0 auto}
-  h1{margin:0 0 4px;font-size:20px}
-  header p{margin:0;color:var(--muted);font-size:13px}
-  main{max-width:860px;margin:0 auto;padding:12px 20px 60px}
+  header{padding:20px 20px 0;max-width:900px;margin:0 auto}
+  h1{margin:0 0 2px;font-size:19px}
+  header .sub{color:var(--muted);font-size:13px}
+  #statsbar{color:var(--muted);font-size:12px;margin-top:6px;min-height:16px}
+  nav{max-width:900px;margin:14px auto 0;padding:0 20px;display:flex;gap:6px;flex-wrap:wrap}
+  nav button{background:transparent;border:1px solid transparent;color:var(--muted);
+       border-radius:8px 8px 0 0;padding:8px 14px;font-size:14px;font-weight:600;cursor:pointer}
+  nav button.on{color:var(--fg);background:var(--panel);border-color:var(--line);border-bottom-color:var(--panel)}
+  main{max-width:900px;margin:0 auto;padding:16px 20px 70px;
+       border-top:1px solid var(--line)}
+  section{display:none} section.on{display:block}
   textarea,input,select{width:100%;background:var(--panel);color:var(--fg);
        border:1px solid var(--line);border-radius:8px;padding:10px;font:inherit}
-  textarea{min-height:220px;resize:vertical;font-size:15px}
+  textarea{min-height:200px;resize:vertical;font-size:15px}
   .row{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}
-  .row > div{flex:1;min-width:130px}
+  .row > div{flex:1;min-width:120px}
   label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
-  button{background:var(--accent);color:#fff;border:0;border-radius:8px;
-       padding:11px 18px;font-size:15px;font-weight:600;cursor:pointer}
-  button.secondary{background:var(--panel);border:1px solid var(--line);color:var(--fg)}
-  button:disabled{opacity:.5;cursor:default}
-  #stats{color:var(--muted);font-size:13px;margin:16px 0 8px}
+  button.act{background:var(--accent);color:#fff;border:0;border-radius:8px;
+       padding:10px 16px;font-size:14px;font-weight:600;cursor:pointer}
+  button.act.sec{background:var(--panel);border:1px solid var(--line);color:var(--fg)}
+  button.act:disabled{opacity:.45;cursor:default}
+  .note{color:var(--muted);font-size:13px;margin:14px 0 8px}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;
        padding:14px 16px;margin-bottom:10px}
   .sent{font-size:21px;line-height:1.6}
   .sent b{color:var(--accent)}
   .meta{margin-top:6px;color:var(--muted);font-size:13px}
   .py{margin-top:2px;color:#6f7a88;font-size:13px}
-  .empty{color:var(--muted);padding:20px 0;text-align:center}
+  .empty{color:var(--muted);padding:24px 0;text-align:center}
+  .chips{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0}
+  .chip{background:var(--panel);border:1px solid var(--line);color:var(--muted);
+       border-radius:999px;padding:5px 12px;font-size:13px;cursor:pointer}
+  .chip.on{color:var(--fg);border-color:var(--accent)}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:12px}
+  td.w{font-size:17px;white-space:nowrap}
+  td.d{color:var(--muted);font-size:13px}
+  .rev{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+       padding:26px 20px;text-align:center;min-height:190px}
+  .rev .q{font-size:26px;line-height:1.6}
+  .rev .a{margin-top:14px;font-size:20px}
+  .rev .a .p{color:var(--muted);font-size:16px}
+  .grades{display:flex;gap:8px;margin-top:16px}
+  .grades button{flex:1;border:0;border-radius:8px;padding:12px 0;
+       font-size:14px;font-weight:600;cursor:pointer;color:#fff}
+  .again{background:#b8443a} .good{background:#3d7f5f} .easy{background:#3a6ea5}
+  .bar{height:4px;background:var(--line);border-radius:2px;margin-bottom:14px}
+  .bar > i{display:block;height:4px;background:var(--accent);border-radius:2px;width:0}
+  code{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-size:13px}
+  .warnbox{background:#2a2418;border:1px solid #5a4a20;color:var(--warn);
+       border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:14px}
+  .ok{color:var(--ok)} .muted{color:var(--muted)}
 </style>
 </head>
 <body>
 <header>
   <h1>Hanzi Miner</h1>
-  <p>Paste Chinese → keep only sentences with exactly one word you don't know → export an Anki deck.</p>
+  <div class="sub">Mine i+1 sentences · review them · generate new dialogues from what you're learning</div>
+  <div id="statsbar"></div>
 </header>
+
+<nav>
+  <button data-tab="mine" class="on">Mine</button>
+  <button data-tab="review">Review</button>
+  <button data-tab="library">Library</button>
+  <button data-tab="generate">Generate</button>
+</nav>
+
 <main>
-  <textarea id="text" placeholder="Paste dialogue or prose here (Chinese, with punctuation).
+  <div id="dbwarn" class="warnbox" style="display:none"></div>
+
+  <!-- ------------------------------------------------ MINE -->
+  <section id="tab-mine" class="on">
+    <textarea id="text" placeholder="Paste dialogue or prose here (Chinese, with punctuation).
 
 小明：你今天去哪儿了？
 小红：我去图书馆看书了。"></textarea>
-
-  <div class="row">
-    <div>
-      <label>Input type</label>
-      <select id="mode">
-        <option value="dialogue">Dialogue (mine across turns)</option>
-        <option value="prose">Prose (mine per sentence)</option>
-      </select>
+    <div class="row">
+      <div><label>Input type</label>
+        <select id="mode">
+          <option value="dialogue">Dialogue (mine across turns)</option>
+          <option value="prose">Prose (mine per sentence)</option>
+        </select></div>
+      <div><label>Words I already know</label>
+        <select id="level">
+          <option value="1">HSK 1</option><option value="2" selected>HSK 1–2</option>
+          <option value="3">HSK 1–3</option><option value="4">HSK 1–4</option>
+          <option value="5">HSK 1–5</option><option value="6">HSK 1–6</option>
+        </select></div>
+      <div><label>New words per card</label>
+        <select id="max_unknown">
+          <option value="1" selected>Exactly 1 (true i+1)</option>
+          <option value="2">Up to 2</option>
+        </select></div>
+      <div><label>Title (optional)</label>
+        <input id="title" placeholder="auto"></div>
     </div>
-    <div>
-      <label>Words I already know</label>
-      <select id="level">
-        <option value="1">HSK 1</option>
-        <option value="2" selected>HSK 1–2</option>
-        <option value="3">HSK 1–3</option>
-        <option value="4">HSK 1–4</option>
-        <option value="5">HSK 1–5</option>
-        <option value="6">HSK 1–6</option>
-      </select>
-    </div>
-    <div>
-      <label>New words per card</label>
-      <select id="max_unknown">
-        <option value="1" selected>Exactly 1 (true i+1)</option>
-        <option value="2">Up to 2</option>
-      </select>
-    </div>
-  </div>
-
-  <div class="row">
-    <div style="flex:3">
+    <div class="row"><div style="flex:3">
       <label>Extra known words (optional — paste from Anki, one per line or comma-separated)</label>
-      <textarea id="extra_known" style="min-height:60px"></textarea>
+      <textarea id="extra_known" style="min-height:56px"></textarea>
+    </div></div>
+    <div class="row">
+      <button id="mineBtn" class="act">Mine</button>
+      <button id="saveBtn" class="act sec" disabled>Save to library</button>
+      <button id="deckBtn" class="act sec" disabled>Download Anki deck</button>
     </div>
-  </div>
+    <div id="mineStats" class="note"></div>
+    <div id="results"></div>
+  </section>
 
-  <div class="row">
-    <button id="mineBtn">Mine</button>
-    <button id="deckBtn" class="secondary" disabled>Download Anki deck</button>
-  </div>
+  <!-- ------------------------------------------------ REVIEW -->
+  <section id="tab-review">
+    <div id="revSummary" class="note"></div>
+    <div class="bar"><i id="revBar"></i></div>
+    <div id="revBody"></div>
+  </section>
 
-  <div id="stats"></div>
-  <div id="results"></div>
+  <!-- ------------------------------------------------ LIBRARY -->
+  <section id="tab-library">
+    <div class="chips" id="wordFilters">
+      <span class="chip on" data-f="all">All</span>
+      <span class="chip" data-f="due">Due</span>
+      <span class="chip" data-f="new">New</span>
+      <span class="chip" data-f="learning">Learning</span>
+      <span class="chip" data-f="known">Known</span>
+    </div>
+    <input id="wordSearch" placeholder="Search word, pinyin or meaning…">
+    <div id="wordsOut"></div>
+    <h3 style="font-size:15px;margin:26px 0 6px">Past texts</h3>
+    <div id="textsOut"></div>
+  </section>
+
+  <!-- ------------------------------------------------ GENERATE -->
+  <section id="tab-generate">
+    <div id="genWarn" class="warnbox" style="display:none"></div>
+    <div class="note">Builds a fresh dialogue around words you're weakest on, then files it in your library.</div>
+    <div class="row">
+      <div><label>Words to use</label><input id="genCount" type="number" value="15" min="4" max="40"></div>
+      <div><label>Level</label>
+        <select id="genLevel">
+          <option value="2">HSK 2</option><option value="3" selected>HSK 3</option>
+          <option value="4">HSK 4</option><option value="5">HSK 5</option>
+        </select></div>
+      <div><label>Turns</label><input id="genTurns" type="number" value="10" min="4" max="20"></div>
+      <div><label>Topic (optional)</label><input id="genTopic" placeholder="e.g. renting an apartment"></div>
+    </div>
+    <div class="row"><button id="genBtn" class="act">Generate dialogue</button></div>
+    <div id="genStats" class="note"></div>
+    <div id="genOut"></div>
+  </section>
 </main>
 
 <script>
-const $ = (id) => document.getElementById(id);
-let lastCards = [];
+/* Server-provided config MUST be defined before the app script reads it. */
+window.HAS_DB = {{ 'true' if has_db else 'false' }};
+window.CAN_GENERATE = {{ 'true' if can_generate else 'false' }};
 
-function body(){
-  return {
-    text: $("text").value,
-    mode: $("mode").value,
-    level: $("level").value,
-    max_unknown: $("max_unknown").value,
-    extra_known: $("extra_known").value,
-  };
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c =>
+  ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+async function api(path, opts){
+  const res = await fetch(path, opts);
+  let body = null;
+  try { body = await res.json(); } catch(e) { body = {}; }
+  if(!res.ok) throw new Error(body.detail || body.error || ("HTTP " + res.status));
+  return body;
+}
+const post = (p, data) => api(p, {method:"POST", headers:{"Content-Type":"application/json"},
+                                 body: JSON.stringify(data)});
+
+/* ---------------------------------------------------------- tabs */
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("nav button").forEach(x => x.classList.toggle("on", x === b));
+  document.querySelectorAll("section").forEach(s => s.classList.toggle("on", s.id === "tab-" + b.dataset.tab));
+  if(b.dataset.tab === "review") loadReview();
+  if(b.dataset.tab === "library") loadLibrary();
+});
+
+/* ---------------------------------------------------------- stats */
+async function loadStats(){
+  try{
+    const s = await api("/api/stats");
+    $("statsbar").innerHTML =
+      `<span class="ok">${s.words}</span> words · ` +
+      `<span class="ok">${s.known}</span> known · <span class="ok">${s.due}</span> due · ` +
+      `<span class="ok">${s.new}</span> new · ${s.texts} texts`;
+  }catch(e){ $("statsbar").textContent = ""; }
 }
 
-function render(r){
+if(!HAS_DB){
+  $("dbwarn").style.display = "block";
+  $("dbwarn").innerHTML = "No database configured — mining and Anki export work, but saving, " +
+    "review and the library are off. Set <code>DATABASE_URL</code> to enable them.";
+}
+if(!CAN_GENERATE){
+  $("genWarn").style.display = "block";
+  $("genWarn").innerHTML = "No <code>DO_INFERENCE_KEY</code> on the server, so generation is off. " +
+    "Set it to a DigitalOcean Model Access Key.";
+  $("genBtn").disabled = true;
+}
+
+/* ---------------------------------------------------------- mine */
+let lastResult = null;
+
+function mineBody(){
+  return {text: $("text").value, mode: $("mode").value, level: $("level").value,
+          max_unknown: $("max_unknown").value, extra_known: $("extra_known").value,
+          title: $("title").value};
+}
+
+function renderMine(r){
+  lastResult = r;
   const s = r.stats;
-  $("stats").textContent =
-    `${s.lines} lines → ${s.units} units → ${s.candidates} matched → ${s.mined} cards`;
+  $("mineStats").textContent =
+    `${s.lines} lines → ${s.units} units → ${s.candidates} matched → ${s.mined} cards ` +
+    `(${s.complex_forms} complex-form)`;
   const box = $("results");
   if(!r.cards.length){
     box.innerHTML = '<div class="empty">No i+1 sentences found. Either the text is all-known, ' +
-      'or every unit has 2+ unknown words — try lowering your known level, or switch to "Up to 2".</div>';
-    $("deckBtn").disabled = true;
+      'or every unit has 2+ unknown words — lower your known level, or switch to “Up to 2”.</div>';
+    $("deckBtn").disabled = $("saveBtn").disabled = true;
     return;
   }
-  box.innerHTML = r.cards.map((c,i)=>{
-    const sent = c.sentence.replace(c.target, `<b>${c.target}</b>`);
-    const defs = (c.defs && c.defs.length) ? c.defs.slice(0,3).join("; ") : "(no dictionary entry)";
-    return `<div class="card">
-      <div class="sent">${sent}</div>
-      <div class="meta">${c.target} · ${c.target_pinyin||""} — ${defs}</div>
-      ${c.sentence_pinyin ? `<div class="py">${c.sentence_pinyin}</div>` : ""}
-    </div>`;
+  box.innerHTML = r.cards.map(c => {
+    const sent = esc(c.sentence).replace(esc(c.target), `<b>${esc(c.target)}</b>`);
+    const defs = (c.defs && c.defs.length) ? esc(c.defs.slice(0,3).join("; ")) : "(no dictionary entry)";
+    return `<div class="card"><div class="sent">${sent}</div>
+      <div class="meta">${esc(c.target)} · ${esc(c.target_pinyin||"")} — ${defs}</div>
+      ${c.sentence_pinyin ? `<div class="py">${esc(c.sentence_pinyin)}</div>` : ""}</div>`;
   }).join("");
   $("deckBtn").disabled = false;
+  $("saveBtn").disabled = !HAS_DB;
 }
 
 async function mineNow(){
-  $("mineBtn").disabled = true;
-  $("stats").textContent = "Mining…";
-  try{
-    const res = await fetch("/api/mine", {method:"POST",
-      headers:{"Content-Type":"application/json"}, body: JSON.stringify(body())});
-    const r = await res.json();
-    lastCards = r.cards || [];
-    render(r);
-  }catch(e){ $("stats").textContent = "Error: " + e; }
+  $("mineBtn").disabled = true; $("mineStats").textContent = "Mining…";
+  try{ renderMine(await post("/api/mine", mineBody())); }
+  catch(e){ $("mineStats").textContent = "Error: " + e.message; }
   $("mineBtn").disabled = false;
+}
+
+async function saveNow(){
+  if(!lastResult || !lastResult.cards.length) return;
+  $("saveBtn").disabled = true;
+  try{
+    const r = await post("/api/save", {text: $("text").value, cards: lastResult.cards,
+      mode: $("mode").value, level: $("level").value, title: $("title").value});
+    $("mineStats").innerHTML = `Saved as text #${r.text_id} — ` +
+      `<span class="ok">${r.words}</span> words (${r.new_words} new). ` +
+      `Review queue now has ${r.stats.due + r.stats.new} cards.`;
+    loadStats();
+  }catch(e){ $("mineStats").textContent = "Save failed: " + e.message; }
+  $("saveBtn").disabled = false;
 }
 
 async function downloadDeck(){
   $("deckBtn").disabled = true;
   try{
-    const res = await fetch("/api/deck", {method:"POST",
-      headers:{"Content-Type":"application/json"}, body: JSON.stringify(body())});
+    const res = await fetch("/api/deck", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify(mineBody())});
     if(!res.ok){ alert("No cards to export."); }
     else{
-      const blob = await res.blob();
       const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = "Hanzi Miner.apkg";
-      a.click();
+      a.href = URL.createObjectURL(await res.blob());
+      a.download = "Hanzi Miner.apkg"; a.click();
       URL.revokeObjectURL(a.href);
     }
-  }catch(e){ alert("Error: " + e); }
+  }catch(e){ alert("Error: " + e.message); }
   $("deckBtn").disabled = false;
 }
 
-$("mineBtn").addEventListener("click", mineNow);
-$("deckBtn").addEventListener("click", downloadDeck);
+$("mineBtn").onclick = mineNow;
+$("saveBtn").onclick = saveNow;
+$("deckBtn").onclick = downloadDeck;
+
+/* ---------------------------------------------------------- review */
+let queue = [], qi = 0, revealed = false, reviewed = 0;
+
+async function loadReview(){
+  $("revBody").innerHTML = '<div class="empty">Loading…</div>';
+  try{
+    const r = await api("/api/review?limit=20");
+    queue = r.queue; qi = 0; reviewed = 0;
+    renderReview();
+  }catch(e){
+    $("revBody").innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+    $("revSummary").textContent = "";
+  }
+}
+
+function renderReview(){
+  if(!queue.length || qi >= queue.length){
+    $("revBar").style.width = queue.length ? "100%" : "0";
+    $("revSummary").textContent = queue.length
+      ? `Session done — ${reviewed} reviewed out of ${queue.length}.`
+      : "";
+    $("revBody").innerHTML = `<div class="empty">` +
+      (queue.length ? "Nothing left in this batch. " : "Nothing due right now. ") +
+      `Mine and save some text, or generate a dialogue to bring weak words back.</div>`;
+    loadStats();
+    return;
+  }
+  const c = queue[qi];
+  $("revSummary").textContent = `${qi+1} / ${queue.length} · box ${c.box} · ${c.reviews} reviews · seen ${c.times_seen}×`;
+  $("revBar").style.width = (qi / queue.length * 100) + "%";
+
+  const masked = esc(c.sentence).replace(esc(c.word), "<b>▁▁▁</b>");
+  const shown  = esc(c.sentence).replace(esc(c.word), `<b>${esc(c.word)}</b>`);
+  $("revBody").innerHTML = `<div class="rev">
+      <div class="q">${revealed ? shown : masked || esc(c.word)}</div>
+      ${revealed
+        ? `<div class="a">${esc(c.word)} <span class="p">${esc(c.pinyin||"")}</span></div>
+           <div class="meta">${esc(c.defs||"(no dictionary entry)")}</div>`
+        : ""}
+    </div>
+    ${revealed
+      ? `<div class="grades">
+           <button class="again" data-r="again">Again</button>
+           <button class="good"  data-r="good">Good</button>
+           <button class="easy"  data-r="easy">Easy</button>
+         </div>`
+      : `<div class="row"><button class="act" id="revealBtn">Show answer</button></div>`}`;
+
+  if(!revealed) $("revealBtn").onclick = () => { revealed = true; renderReview(); };
+  else document.querySelectorAll(".grades button").forEach(b => b.onclick = () => grade(b.dataset.r));
+}
+
+async function grade(result){
+  const c = queue[qi];
+  try{
+    await post("/api/review", {word: c.word, result: result});
+    reviewed++; qi++; revealed = false; renderReview();
+  }catch(e){ $("revSummary").textContent = "Error: " + e.message; }
+}
+
+/* ---------------------------------------------------------- library */
+let wordFilter = "all";
+
+document.querySelectorAll("#wordFilters .chip").forEach(ch => ch.onclick = () => {
+  document.querySelectorAll("#wordFilters .chip").forEach(x => x.classList.toggle("on", x === ch));
+  wordFilter = ch.dataset.f; loadWords();
+});
+let searchTimer = null;
+$("wordSearch").oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(loadWords, 250); };
+
+async function loadWords(){
+  $("wordsOut").innerHTML = '<div class="empty">Loading…</div>';
+  try{
+    const q = encodeURIComponent($("wordSearch").value);
+    const r = await api(`/api/words?filter=${wordFilter}&q=${q}`);
+    if(!r.words.length){ $("wordsOut").innerHTML = '<div class="empty">No words match.</div>'; return; }
+    $("wordsOut").innerHTML = `<table><tr><th>Word</th><th>Meaning</th><th>Box</th><th>Due</th><th>Seen</th></tr>` +
+      r.words.map(w => `<tr>
+        <td class="w">${esc(w.word)}<div class="d">${esc(w.pinyin||"")}</div></td>
+        <td class="d">${esc(w.defs||"—")}
+          ${w.sentences && w.sentences.length ? `<div class="py">${esc(w.sentences[0])}</div>` : ""}</td>
+        <td class="d">${w.box}</td><td class="d">${esc(w.due_at)}</td><td class="d">${w.times_seen}</td>
+      </tr>`).join("") + `</table>`;
+  }catch(e){ $("wordsOut").innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
+async function loadLibrary(){
+  loadWords();
+  $("textsOut").innerHTML = '<div class="empty">Loading…</div>';
+  try{
+    const r = await api("/api/library");
+    if(!r.texts.length){ $("textsOut").innerHTML = '<div class="empty">Nothing saved yet.</div>'; return; }
+    $("textsOut").innerHTML = r.texts.map(t => `<div class="card">
+        <div><strong>${esc(t.title||"Untitled")}</strong>
+          <span class="meta">· ${esc(t.source)} · HSK ${t.level} · ${t.sentence_count} sentences
+          · ${esc((t.created_at||"").slice(0,10))}</span></div>
+        <div style="margin-top:8px"><button class="chip" data-text="${t.id}">Show dialogue</button></div>
+        <div id="text-${t.id}" style="display:none;margin-top:10px;white-space:pre-wrap;font-size:17px">${esc(t.body)}</div>
+      </div>`).join("");
+    document.querySelectorAll("[data-text]").forEach(b => b.onclick = () => {
+      const el = $("text-" + b.dataset.text);
+      el.style.display = el.style.display === "none" ? "block" : "none";
+    });
+  }catch(e){ $("textsOut").innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
+/* ---------------------------------------------------------- generate */
+$("genBtn").onclick = async () => {
+  $("genBtn").disabled = true;
+  $("genStats").textContent = "Writing a dialogue… (can take ~30s)";
+  $("genOut").innerHTML = "";
+  try{
+    const r = await post("/api/generate", {
+      count: +$("genCount").value, level: +$("genLevel").value,
+      turns: +$("genTurns").value, topic: $("genTopic").value, save: true
+    });
+    const d = r.dialogue;
+    $("genStats").innerHTML = `<span class="ok">${esc(d.model)}</span> · ` +
+      `used ${d.words_used.length}/${d.words_requested.length} target words` +
+      (d.words_missed.length ? ` · missed: ${esc(d.words_missed.join("、"))}` : "") +
+      (r.saved && r.saved.text_id ? ` · saved as text #${r.saved.text_id}` : "");
+    $("genOut").innerHTML = `<div class="card"><div style="white-space:pre-wrap;font-size:19px">${esc(d.body)}</div>
+      <div class="meta" style="margin-top:10px">Target words: ${esc(d.words_requested.join("、"))}</div></div>`;
+    loadStats();
+  }catch(e){ $("genStats").textContent = "Error: " + e.message; }
+  $("genBtn").disabled = false;
+};
+
+/* ---------------------------------------------------------- boot */
+loadStats();
 </script>
 </body>
 </html>

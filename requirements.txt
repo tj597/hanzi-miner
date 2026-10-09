@@ -3,3 +3,5 @@ jieba==0.42.1
 genanki==0.13.1
 pypinyin==0.55.0
 gunicorn==23.0.0
+requests==2.34.2
+psycopg[binary]==3.3.6

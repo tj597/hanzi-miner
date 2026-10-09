@@ -125,6 +125,21 @@
 
   <!-- ------------------------------------------------ REVIEW -->
   <section id="tab-review">
+    <div class="row" style="margin-top:0">
+      <div style="flex:0 0 auto">
+        <label>Card type</label>
+        <div class="chips" id="revModes" style="margin:0">
+          <span class="chip on" data-m="self">Self-grade</span>
+          <span class="chip" data-m="quiz">Multiple choice</span>
+        </div>
+      </div>
+      <div style="flex:0 0 auto">
+        <label>Hints</label>
+        <div class="chips" style="margin:0">
+          <span class="chip" id="revPinyinHint">Show pinyin</span>
+        </div>
+      </div>
+    </div>
     <div id="revSummary" class="note"></div>
     <div class="bar"><i id="revBar"></i></div>
     <div id="revBody"></div>
@@ -141,7 +156,9 @@
     </div>
     <input id="wordSearch" placeholder="Search word, pinyin or meaning…">
     <div id="wordsOut"></div>
-    <h3 style="font-size:15px;margin:26px 0 6px">Past texts</h3>
+    <h3 style="font-size:15px;margin:26px 0 6px">Past texts
+      <span class="chip" id="textPinyin" style="margin-left:10px;font-weight:400">Show pinyin</span>
+    </h3>
     <div id="textsOut"></div>
   </section>
 
@@ -159,7 +176,10 @@
       <div><label>Turns</label><input id="genTurns" type="number" value="10" min="4" max="20"></div>
       <div><label>Topic (optional)</label><input id="genTopic" placeholder="e.g. renting an apartment"></div>
     </div>
-    <div class="row"><button id="genBtn" class="act">Generate dialogue</button></div>
+    <div class="row">
+      <button id="genBtn" class="act">Generate dialogue</button>
+      <span class="chip" id="genPinyin" style="align-self:center">Show pinyin</span>
+    </div>
     <div id="genStats" class="note"></div>
     <div id="genOut"></div>
   </section>
@@ -291,17 +311,42 @@ $("deckBtn").onclick = downloadDeck;
 
 /* ---------------------------------------------------------- review */
 let queue = [], qi = 0, revealed = false, reviewed = 0;
+let revMode = "self", revPinyin = false, quizLocked = false, quizChoice = null;
+
+document.querySelectorAll("#revModes .chip").forEach(ch => ch.onclick = () => {
+  document.querySelectorAll("#revModes .chip").forEach(x => x.classList.toggle("on", x === ch));
+  revMode = ch.dataset.m;
+  loadReview();
+});
+$("revPinyinHint").onclick = () => {
+  revPinyin = !revPinyin;
+  $("revPinyinHint").classList.toggle("on", revPinyin);
+  if(queue.length) renderReview();
+};
 
 async function loadReview(){
   $("revBody").innerHTML = '<div class="empty">Loading…</div>';
   try{
-    const r = await api("/api/review?limit=20");
-    queue = r.queue; qi = 0; reviewed = 0;
+    const r = await api(`/api/review?limit=20&mode=${revMode}`);
+    queue = r.queue; qi = 0; reviewed = 0; revealed = false;
+    if(revMode === "quiz" && queue.length && !r.quizable){
+      $("revSummary").textContent = "";
+      $("revBody").innerHTML = '<div class="empty">Not enough words in the bank to build ' +
+        'plausible wrong answers yet. Save a few more texts, or use Self-grade.</div>';
+      return;
+    }
     renderReview();
   }catch(e){
     $("revBody").innerHTML = `<div class="empty">${esc(e.message)}</div>`;
     $("revSummary").textContent = "";
   }
+}
+
+/* Replace EVERY occurrence of the target, and mask it when asked. */
+function sentenceHTML(text, word, hideWord){
+  const s = esc(text);
+  if(!word || !s) return s || `<b>${esc(word)}</b>`;
+  return s.split(esc(word)).join(hideWord ? "<b>▁▁▁</b>" : `<b>${esc(word)}</b>`);
 }
 
 function renderReview(){
@@ -319,11 +364,44 @@ function renderReview(){
   const c = queue[qi];
   $("revSummary").textContent = `${qi+1} / ${queue.length} · box ${c.box} · ${c.reviews} reviews · seen ${c.times_seen}×`;
   $("revBar").style.width = (qi / queue.length * 100) + "%";
+  const hint = (revPinyin && c.sentence_pinyin)
+    ? `<div class="py" style="margin-top:8px">${esc(c.sentence_pinyin)}</div>` : "";
 
-  const masked = esc(c.sentence).replace(esc(c.word), "<b>▁▁▁</b>");
-  const shown  = esc(c.sentence).replace(esc(c.word), `<b>${esc(c.word)}</b>`);
+  /* ---- multiple choice: pick the meaning, graded automatically ---- */
+  if(revMode === "quiz"){
+    $("revBody").innerHTML = `<div class="rev">
+        <div class="q">${sentenceHTML(c.sentence, c.word, true)}</div>
+        ${hint}
+        <div class="a">What does <b>${esc(c.word)}</b> mean?</div>
+      </div>
+      <div id="quizOpts" style="max-width:540px;margin:14px auto 0"></div>`;
+    $("quizOpts").innerHTML = (c.options || []).map((o, i) => {
+      let cls = "chip";
+      if(quizLocked && i === c.answer) cls += " on";
+      const wrong = quizLocked && i === quizChoice && i !== c.answer;
+      const style = "display:block;width:100%;text-align:left;margin-bottom:8px;padding:11px 14px;font:inherit"
+        + (wrong ? ";border-color:#b8443a;color:#e2604a" : "");
+      return `<button class="${cls}" data-i="${i}" style="${style}">${esc(o)}</button>`;
+    }).join("");
+    $("quizOpts").querySelectorAll("button").forEach(b => b.onclick = () => {
+      if(quizLocked) return;
+      const picked = +b.dataset.i;
+      quizChoice = picked; quizLocked = true;
+      renderReview();
+      setTimeout(() => {
+        quizLocked = false; quizChoice = null;
+        grade(picked === c.answer ? "good" : "again");
+      }, 800);
+    });
+    return;
+  }
+
+  /* ---- self-graded card ---- */
+  const masked = sentenceHTML(c.sentence, c.word, true);
+  const shown  = sentenceHTML(c.sentence, c.word, false);
   $("revBody").innerHTML = `<div class="rev">
       <div class="q">${revealed ? shown : masked || esc(c.word)}</div>
+      ${hint}
       ${revealed
         ? `<div class="a">${esc(c.word)} <span class="p">${esc(c.pinyin||"")}</span></div>
            <div class="meta">${esc(c.defs||"(no dictionary entry)")}</div>`
@@ -365,14 +443,66 @@ async function loadWords(){
     const q = encodeURIComponent($("wordSearch").value);
     const r = await api(`/api/words?filter=${wordFilter}&q=${q}`);
     if(!r.words.length){ $("wordsOut").innerHTML = '<div class="empty">No words match.</div>'; return; }
-    $("wordsOut").innerHTML = `<table><tr><th>Word</th><th>Meaning</th><th>Box</th><th>Due</th><th>Seen</th></tr>` +
+    $("wordsOut").innerHTML =
+      `<table><tr><th>Word</th><th>Meaning</th><th>Box</th><th>Due</th><th>Seen</th><th></th></tr>` +
       r.words.map(w => `<tr>
         <td class="w">${esc(w.word)}<div class="d">${esc(w.pinyin||"")}</div></td>
         <td class="d">${esc(w.defs||"—")}
           ${w.sentences && w.sentences.length ? `<div class="py">${esc(w.sentences[0])}</div>` : ""}</td>
         <td class="d">${w.box}</td><td class="d">${esc(w.due_at)}</td><td class="d">${w.times_seen}</td>
+        <td class="d"><button class="chip" data-del="${encodeURIComponent(w.word)}"
+          title="Delete this word from the bank" style="padding:3px 9px">✕</button></td>
       </tr>`).join("") + `</table>`;
+    document.querySelectorAll("[data-del]").forEach(b =>
+      b.onclick = () => deleteWord(decodeURIComponent(b.dataset.del), b));
   }catch(e){ $("wordsOut").innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
+async function deleteWord(word, btn){
+  const ok = confirm(`Delete "${word}" from the word bank?\n\n` +
+    "This discards its review progress and stops it appearing in reviews and generated " +
+    "dialogues. The text it came from stays in the library.");
+  if(!ok) return;
+  btn.disabled = true;
+  try{
+    await post("/api/words/delete", {word: word});
+    loadStats(); loadWords();
+  }catch(e){ alert("Delete failed: " + e.message); btn.disabled = false; }
+}
+
+/* Texts are fetched on expand so the pinyin line can be toggled without refetching. */
+let textPinyin = false;
+$("textPinyin").onclick = () => {
+  textPinyin = !textPinyin;
+  $("textPinyin").classList.toggle("on", textPinyin);
+  document.querySelectorAll("[data-text][data-open='1']").forEach(renderText);
+};
+
+function renderText(btn){
+  const el = $("text-" + btn.dataset.text);
+  const lines = JSON.parse(el.dataset.lines || "[]");
+  el.innerHTML = lines.map(l => `<div style="margin-bottom:7px">
+      ${l.speaker ? `<span class="muted">${esc(l.speaker)}：</span>` : ""}${esc(l.text)}
+      ${textPinyin && l.pinyin ? `<div class="py">${esc(l.pinyin)}</div>` : ""}
+    </div>`).join("");
+}
+
+async function toggleText(btn){
+  const el = $("text-" + btn.dataset.text);
+  if(btn.dataset.open === "1"){
+    el.style.display = "none"; btn.dataset.open = "0"; btn.textContent = "Show dialogue";
+    return;
+  }
+  btn.dataset.open = "1"; btn.textContent = "Hide dialogue"; el.style.display = "block";
+  if(btn.dataset.loaded !== "1"){
+    el.innerHTML = '<div class="empty">Loading…</div>';
+    try{
+      const t = await api(`/api/texts/${btn.dataset.text}`);
+      el.dataset.lines = JSON.stringify(t.lines || []);
+      btn.dataset.loaded = "1";
+    }catch(e){ el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  }
+  renderText(btn);
 }
 
 async function loadLibrary(){
@@ -385,17 +515,31 @@ async function loadLibrary(){
         <div><strong>${esc(t.title||"Untitled")}</strong>
           <span class="meta">· ${esc(t.source)} · HSK ${t.level} · ${t.sentence_count} sentences
           · ${esc((t.created_at||"").slice(0,10))}</span></div>
-        <div style="margin-top:8px"><button class="chip" data-text="${t.id}">Show dialogue</button></div>
-        <div id="text-${t.id}" style="display:none;margin-top:10px;white-space:pre-wrap;font-size:17px">${esc(t.body)}</div>
+        <div style="margin-top:8px"><button class="chip" data-text="${t.id}" data-open="0">Show dialogue</button></div>
+        <div id="text-${t.id}" style="display:none;margin-top:10px;font-size:17px"></div>
       </div>`).join("");
-    document.querySelectorAll("[data-text]").forEach(b => b.onclick = () => {
-      const el = $("text-" + b.dataset.text);
-      el.style.display = el.style.display === "none" ? "block" : "none";
-    });
+    document.querySelectorAll("[data-text]").forEach(b => b.onclick = () => toggleText(b));
   }catch(e){ $("textsOut").innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
 
 /* ---------------------------------------------------------- generate */
+let lastDialogue = null, genPinyin = false;
+
+$("genPinyin").onclick = () => {
+  genPinyin = !genPinyin;
+  $("genPinyin").classList.toggle("on", genPinyin);
+  if(lastDialogue) renderDialogue(lastDialogue);
+};
+
+function renderDialogue(d){
+  const lines = d.lines || [];
+  $("genOut").innerHTML = `<div class="card">` + lines.map(l => `<div style="margin-bottom:7px">
+      ${l.speaker ? `<span class="muted">${esc(l.speaker)}：</span>` : ""}<span style="font-size:19px">${esc(l.text)}</span>
+      ${genPinyin && l.pinyin ? `<div class="py">${esc(l.pinyin)}</div>` : ""}
+    </div>`).join("") +
+    `<div class="meta" style="margin-top:10px">Target words: ${esc(d.words_requested.join("、"))}</div></div>`;
+}
+
 $("genBtn").onclick = async () => {
   $("genBtn").disabled = true;
   $("genStats").textContent = "Writing a dialogue… (can take ~30s)";
@@ -406,12 +550,12 @@ $("genBtn").onclick = async () => {
       turns: +$("genTurns").value, topic: $("genTopic").value, save: true
     });
     const d = r.dialogue;
+    lastDialogue = d;
     $("genStats").innerHTML = `<span class="ok">${esc(d.model)}</span> · ` +
       `used ${d.words_used.length}/${d.words_requested.length} target words` +
       (d.words_missed.length ? ` · missed: ${esc(d.words_missed.join("、"))}` : "") +
       (r.saved && r.saved.text_id ? ` · saved as text #${r.saved.text_id}` : "");
-    $("genOut").innerHTML = `<div class="card"><div style="white-space:pre-wrap;font-size:19px">${esc(d.body)}</div>
-      <div class="meta" style="margin-top:10px">Target words: ${esc(d.words_requested.join("、"))}</div></div>`;
+    renderDialogue(d);
     loadStats();
   }catch(e){ $("genStats").textContent = "Error: " + e.message; }
   $("genBtn").disabled = false;

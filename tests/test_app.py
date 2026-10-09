@@ -42,6 +42,15 @@ SAMPLE = """小明：你好！你今天怎么样？
 client = app_mod.app.test_client()
 SEED: dict = {}
 
+# pypinyin emits tone-marked vowels; a pinyin string has those or plain Latin.
+_TONE = set("āáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜÜü")
+
+
+def _looks_like_pinyin(s: str) -> bool:
+    return bool(s) and (
+        any(c.isascii() and c.isalpha() for c in s) or any(c in _TONE for c in s)
+    )
+
 
 def _j(resp):
     return resp.get_json()
@@ -190,6 +199,69 @@ def test_generate_uses_bank_words_and_saves():
     assert r["dialogue"]["body"], r
     assert r["saved"] and r["saved"]["text_id"], r.get("saved")
     assert r["mined"] and r["mined"]["stats"]["lines"] > 0
+    lines = r["dialogue"]["lines"]
+    assert lines, "generated dialogue should expose per-line rows"
+    assert all(l["speaker"] for l in lines), "every generated turn has a speaker"
+    assert all(_looks_like_pinyin(l["pinyin"]) for l in lines), lines[0]
+
+
+def test_review_cards_carry_sentence_pinyin():
+    q = _j(client.get("/api/review?limit=5"))["queue"]
+    assert q
+    with_sent = [c for c in q if c["sentence"]]
+    assert with_sent, "review cards should carry a context sentence"
+    assert all(_looks_like_pinyin(c["sentence_pinyin"]) for c in with_sent), with_sent[0]
+
+
+def test_quiz_mode_builds_multiple_choice():
+    r = _j(client.get("/api/review?limit=5&mode=quiz"))
+    assert r["mode"] == "quiz"
+    assert r["queue"], "quiz queue should not be empty"
+    assert r["quizable"], "the seeded bank is big enough for 4 options"
+    for c in r["queue"]:
+        assert len(c["options"]) == 4, c
+        assert len(set(c["options"])) == 4, f"options must be distinct: {c['options']}"
+        assert c["options"][c["answer"]] == c["answer_text"]
+        assert c["sentence_pinyin"], "quiz cards keep the pinyin hint too"
+
+
+def test_default_review_mode_is_self_graded():
+    r = _j(client.get("/api/review?limit=3"))
+    assert r["mode"] == "self"
+    assert "quizable" not in r
+
+
+def test_text_lines_include_pinyin():
+    lib = _j(client.get("/api/library"))
+    assert lib["texts"]
+    t = _j(client.get(f"/api/texts/{lib['texts'][0]['id']}"))
+    assert t["lines"], "a text should expose per-line rows"
+    assert all("text" in l and "pinyin" in l for l in t["lines"])
+    assert _looks_like_pinyin(" ".join(l["pinyin"] for l in t["lines"]))
+
+
+def test_delete_word_removes_it_and_its_sentences():
+    # Make our OWN word so the seeded words stay put for the other tests.
+    # Level 3 matters: at level 2 this sentence has TWO unknown words (中文 and
+    # 语法), so it yields no i+1 card at all.
+    text = "我喜欢学习中文语法。"
+    mined = _j(client.post("/api/mine", json={"text": text, "mode": "prose", "level": 3}))
+    assert mined["cards"], mined
+    _j(client.post("/api/save", json={"text": text, "cards": mined["cards"],
+                                      "mode": "prose", "level": 3, "title": "delete-test"}))
+    word = mined["cards"][0]["target"]
+    before = _j(client.get("/api/stats"))["words"]
+    assert any(w["word"] == word for w in _j(client.get(f"/api/words?q={word}"))["words"])
+
+    r = _j(client.post("/api/words/delete", json={"word": word}))
+    assert r["deleted"] and r["word"] == word, r
+    assert r["sentences_removed"] >= 1, r
+    assert _j(client.get("/api/stats"))["words"] == before - 1
+    assert not any(w["word"] == word for w in _j(client.get(f"/api/words?q={word}"))["words"])
+
+    # re-deleting is a clean 404, and a missing word is a 400 — not a 500
+    assert client.post("/api/words/delete", json={"word": word}).status_code == 404
+    assert client.post("/api/words/delete", json={"word": ""}).status_code == 400
 
 
 if __name__ == "__main__":

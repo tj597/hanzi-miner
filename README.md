@@ -78,9 +78,31 @@ date. *Good* promotes the box and pushes the date out (1, 2, 4, 8, 16, 32 days);
 boxes. The front of the card shows the sentence with the target word masked, so you
 recall it from context rather than recognising it in isolation.
 
+**Two card types**, switchable at the top of Review:
+
+- **Self-grade** — reveal, then Again / Good / Easy.
+- **Multiple choice** — pick the meaning from four options; correct grades *Good*,
+  wrong grades *Again* automatically. Distractors are other words' first dictionary
+  sense, so they get more plausible as your bank grows. With too few words saved
+  there aren't enough plausible wrong answers, and the UI says so and points you
+  back to Self-grade rather than showing a two-option "quiz".
+
+**Show pinyin** toggles a tone-marked reading under the masked sentence — a hint
+before you answer, and for the whole sentence after. Off by default so the card is
+still a real test.
+
 **Library** is the word bank (filter by all / due / new / learning / known, search
 by word, pinyin or meaning, each row showing its context sentence) plus every text
 you've saved or generated, expandable in place.
+
+Each word row has a **✕ delete** button: it removes the word and the sentences
+recorded for it, discarding its review schedule so it stops appearing in reviews and
+in generated dialogues. The source text stays in the library — deleting a word is a
+deliberate "I already know this / this is junk" action, not a way to erase a text.
+
+**Show pinyin** (above Past texts) adds a reading under each line of every expanded
+dialogue and generated text. Texts are fetched on expand so the toggle re-renders
+without refetching.
 
 **Generate** writes a brand-new dialogue around your weakest and most overdue words.
 It picks them from the bank, asks the model for a dialogue that uses all of them at

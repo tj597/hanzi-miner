@@ -27,6 +27,7 @@ import jieba
 
 from dictionary import is_headword, lookup
 from known import charwise_known
+from pinyin_util import to_pinyin
 
 CJK_RANGE = r"\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\U00020000-\U0002ffff"
 _CJK_RE = re.compile(f"[{CJK_RANGE}]")
@@ -190,16 +191,7 @@ def mine(
 
 def add_pinyin(cards: list[dict]) -> list[dict]:
     """Attach tone-marked pinyin for the target word and the whole sentence."""
-    try:
-        from pypinyin import Style, pinyin
-    except ImportError:
-        return cards
-
     for c in cards:
-        c["target_pinyin"] = " ".join(
-            x[0] for x in pinyin(c["target"], style=Style.TONE, errors="ignore")
-        )
-        c["sentence_pinyin"] = " ".join(
-            x[0] for x in pinyin(c["sentence"], style=Style.TONE, errors="ignore")
-        )
+        c["target_pinyin"] = to_pinyin(c["target"])
+        c["sentence_pinyin"] = to_pinyin(c["sentence"])
     return cards

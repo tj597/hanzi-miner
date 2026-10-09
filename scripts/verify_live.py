@@ -72,6 +72,8 @@ def main(base: str) -> int:
 
     status, q = call(base, "/api/review?limit=5")
     check("GET /api/review", status == 200 and q.get("queue"), f"{len(q.get('queue', []))} queued")
+    check("review cards carry sentence pinyin",
+          all(c.get("sentence_pinyin") for c in q.get("queue", []) if c.get("sentence")))
     if q.get("queue"):
         w = q["queue"][0]["word"]
         status, graded = call(base, "/api/review", {"word": w, "result": "good"})
@@ -79,12 +81,27 @@ def main(base: str) -> int:
         status, graded = call(base, "/api/review", {"word": w, "result": "again"})
         check("POST /api/review (again)", status == 200 and graded.get("box") == 0, f"{w} -> box {graded.get('box')}")
 
+    status, qz = call(base, "/api/review?limit=5&mode=quiz")
+    if status == 200 and qz.get("queue"):
+        good = all(
+            len(c["options"]) == 4
+            and len(set(c["options"])) == 4
+            and c["options"][c["answer"]] == c["answer_text"]
+            for c in qz["queue"]
+        )
+        check("quiz mode: 4 distinct options, correct index", bool(good and qz.get("quizable")),
+              f"mode={qz.get('mode')} quizable={qz.get('quizable')}")
+    else:
+        check("quiz mode: 4 distinct options, correct index", False, f"HTTP {status}: {qz.get('error')}")
+
     status, lib = call(base, "/api/library")
     check("GET /api/library", status == 200 and lib.get("texts"), f"{len(lib.get('texts', []))} texts")
     if lib.get("texts"):
         tid = lib["texts"][0]["id"]
         status, one = call(base, f"/api/texts/{tid}")
         check("GET /api/texts/<id>", status == 200 and one.get("targets"))
+        check("text lines carry pinyin",
+              bool(one.get("lines")) and all("pinyin" in l for l in one["lines"]))
 
     status, gen = call(base, "/api/generate", {"count": 10, "level": 3, "turns": 8, "save": True})
     if status == 200:

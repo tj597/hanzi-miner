@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import io
 import os
+import re
 
 from flask import Flask, jsonify, render_template, request, send_file
 
@@ -29,6 +30,7 @@ import deck as deck_mod
 import generate as gen_mod
 from known import build_known
 from miner import add_pinyin, mine
+from pinyin_util import to_pinyin
 
 app = Flask(__name__)
 
@@ -54,6 +56,26 @@ def _no_db(what: str):
         jsonify({"error": f"{what} needs a database", "detail": "DATABASE_URL is not configured"}),
         503,
     )
+
+
+_LINE_RE = re.compile(r"^\s*([^：:\n]{1,10})\s*[：:]\s*(\S.*?)\s*$")
+
+
+def _dialogue_lines(body: str) -> list[dict]:
+    """Split a stored text into speaker/text/pinyin rows for display.
+
+    Used by the generated-dialogue view and the library's text expander, so both
+    can show an optional pinyin line without re-deriving it in the browser.
+    """
+    out = []
+    for raw in (body or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        m = _LINE_RE.match(line)
+        speaker, text = (m.group(1), m.group(2)) if m else ("", line)
+        out.append({"speaker": speaker, "text": text, "pinyin": to_pinyin(text)})
+    return out
 
 
 # ------------------------------------------------------------------ the app
@@ -152,6 +174,25 @@ def api_words():
         return jsonify({"error": str(exc)[:300]}), 500
 
 
+@app.post("/api/words/delete")
+def api_word_delete():
+    """Remove a word from the bank. POST (not DELETE) because the word is CJK and
+    a URL path segment would need encoding for no benefit."""
+    if not db.available():
+        return _no_db("The word bank")
+    payload = request.get_json(force=True, silent=True) or {}
+    word = (payload.get("word") or "").strip()
+    if not word:
+        return jsonify({"error": "no word supplied"}), 400
+    try:
+        out = db.delete_word(word)
+    except Exception as exc:
+        return jsonify({"error": str(exc)[:300]}), 500
+    if not out["deleted"]:
+        return jsonify(out), 404
+    return jsonify({**out, "stats": db.stats()})
+
+
 @app.get("/api/library")
 def api_library():
     if not db.available():
@@ -169,6 +210,7 @@ def api_text(text_id: int):
     t = db.get_text(text_id)
     if not t:
         return jsonify({"error": "not found"}), 404
+    t["lines"] = _dialogue_lines(t["body"])
     return jsonify(t)
 
 
@@ -177,12 +219,19 @@ def api_text(text_id: int):
 
 @app.get("/api/review")
 def api_review_queue():
+    """mode=self (default) for self-graded cards, mode=quiz for multiple choice."""
     if not db.available():
         return _no_db("Review")
+    mode = request.args.get("mode", "self")
+    limit = int(request.args.get("limit", 20))
     try:
-        return jsonify({"queue": db.review_queue(limit=int(request.args.get("limit", 20)))})
+        queue = db.quiz_queue(limit) if mode == "quiz" else db.review_queue(limit)
     except Exception as exc:
         return jsonify({"error": str(exc)[:300]}), 500
+    out = {"queue": queue, "mode": "quiz" if mode == "quiz" else "self"}
+    if mode == "quiz":
+        out["quizable"] = all(q.get("quizable", False) for q in queue) if queue else False
+    return jsonify(out)
 
 
 @app.post("/api/review")
@@ -250,6 +299,7 @@ def api_generate():
         except Exception as exc:
             saved = {"error": str(exc)[:300]}
 
+    out["lines"] = _dialogue_lines(out["body"])
     return jsonify({"dialogue": out, "mined": mined, "saved": saved})
 
 

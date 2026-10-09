@@ -15,10 +15,13 @@ from __future__ import annotations
 
 import contextlib
 import os
+import random
 from datetime import date, timedelta
 
 import psycopg
 from psycopg.rows import dict_row
+
+from pinyin_util import to_pinyin
 
 DATABASE_URL = os.environ.get("DATABASE_URL") or ""
 
@@ -226,6 +229,7 @@ def review_queue(limit: int = 20) -> list[dict]:
         for r in rows:
             sents = _sentences_for(conn, r["word"])
             r["sentence"] = sents[0] if sents else ""
+            r["sentence_pinyin"] = to_pinyin(r["sentence"])
             r.pop("id", None)
             r["due_at"] = r["due_at"].isoformat()
             r["first_seen"] = r["first_seen"].isoformat()
@@ -282,3 +286,58 @@ def pick_words(n: int = 15, weak_first: bool = True) -> list[str]:
     with connect() as conn:
         rows = conn.execute(f"SELECT word FROM words ORDER BY {order} LIMIT %s", (n,)).fetchall()
         return [r["word"] for r in rows]
+
+
+def _first_sense(defs: str | None) -> str:
+    return (defs or "").split(";")[0].strip()
+
+
+def quiz_queue(limit: int = 20) -> list[dict]:
+    """Review queue where each item also carries multiple-choice meanings.
+
+    Distractors are other words' first dictionary sense, sampled from the rest of
+    the bank. A bank with too few usable meanings cannot make a real quiz, so each
+    item carries `quizable` and the UI falls back to self-grading.
+    """
+    items = review_queue(limit)
+    if not items:
+        return items
+
+    with connect() as conn:
+        pool = conn.execute(
+            "SELECT word, defs FROM words WHERE defs IS NOT NULL AND defs <> '' "
+            "ORDER BY random() LIMIT 500"
+        ).fetchall()
+
+    senses = [(p["word"], _first_sense(p["defs"])) for p in pool]
+    senses = [(w, s) for w, s in senses if s]
+
+    for it in items:
+        correct = _first_sense(it.get("defs")) or it["word"]
+        others = [s for w, s in senses if w != it["word"] and s != correct]
+        random.shuffle(others)
+        options = others[:3] + [correct]
+        random.shuffle(options)
+        it["options"] = options
+        it["answer"] = options.index(correct)
+        it["answer_text"] = correct
+        it["quizable"] = len(options) >= 3
+    return items
+
+
+def delete_word(word: str) -> dict:
+    """Remove a word from the bank, together with the sentences recorded for it.
+
+    A deliberate "I already know this" / "this is junk" action — it discards the
+    review schedule and the word stops being offered for review or generation.
+    Source texts are left alone, so the text it came from is still readable.
+    """
+    with connect() as conn:
+        gone = conn.execute(
+            "DELETE FROM words WHERE word = %s RETURNING word", (word,)
+        ).fetchone()
+        removed = conn.execute(
+            "DELETE FROM sentences WHERE target = %s", (word,)
+        ).rowcount
+        conn.commit()
+    return {"deleted": bool(gone), "word": word, "sentences_removed": removed}

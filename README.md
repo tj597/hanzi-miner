@@ -23,16 +23,20 @@ the deck lives in the app now.
 
 ```bash
 git clone <this repo> && cd hanzi-miner
-./scripts/fetch_data.sh          # downloads CC-CEDICT + HSK lists (once)
+./scripts/fetch_data.sh
 python3 -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
 
-createdb hanzi                   # PostgreSQL; only needed for save/review/generate
+createdb hanzi
 export DATABASE_URL=postgresql://localhost/hanzi
-export DO_INFERENCE_KEY=doo_v1_...   # Model Access Key; only needed for Generate
+export DO_INFERENCE_KEY=doo_v1_...
 
-python app.py                    # http://127.0.0.1:8080
+python app.py
 ```
+
+`fetch_data.sh` downloads CC-CEDICT and the HSK lists once. `createdb`,
+`DATABASE_URL` and `DO_INFERENCE_KEY` are only needed for the save/review/generate
+half; `python app.py` serves on http://127.0.0.1:8080.
 
 Without `DATABASE_URL` you still get mining and Anki export; the other tabs say so
 instead of failing silently. Without `DO_INFERENCE_KEY` only the Generate tab is off.
@@ -160,9 +164,12 @@ cost is that `git push` does not redeploy.
 
 ```bash
 doctl apps create --spec .do/app.yaml
-# after the first deploy, do NOT reuse the template — it would wipe the secret:
 doctl apps spec get <app-id> > .do/app.live.yaml
 ```
+
+The second command matters: **after the first deploy, never reuse this template
+for an update** — it would wipe the secret (see below). Branch future edits from
+`.do/app.live.yaml`.
 
 Two gotchas that both look like success:
 
@@ -190,10 +197,13 @@ alternate path 404s. Minting is console-only:
 3. Hand it to the app without recording it anywhere:
 
 ```bash
-read -rs DO_INFERENCE_KEY && export DO_INFERENCE_KEY   # -s keeps it out of history
+read -rs DO_INFERENCE_KEY && export DO_INFERENCE_KEY
 python scripts/set_app_key.py <app-id>
 unset DO_INFERENCE_KEY
 ```
+
+`read -rs` hides the input and keeps the value out of `~/.zsh_history` (a plain
+`export KEY=value` would record it).
 
 `set_app_key.py` fingerprints the key, **tests it against the inference endpoint
 before repointing the app** (so a bad key can't take down a working deployment),

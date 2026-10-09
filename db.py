@@ -341,3 +341,18 @@ def delete_word(word: str) -> dict:
         ).rowcount
         conn.commit()
     return {"deleted": bool(gone), "word": word, "sentences_removed": removed}
+
+
+def delete_text(text_id: int) -> dict:
+    """Remove a saved text from the library.
+
+    The sentences mined from it survive — the foreign key sets their text_id to
+    NULL — so words keep their review context. The words are left alone too: a word
+    may have come from several texts, and removing it is a separate decision.
+    """
+    with connect() as conn:
+        gone = conn.execute(
+            "DELETE FROM texts WHERE id = %s RETURNING id", (text_id,)
+        ).fetchone()
+        conn.commit()
+    return {"deleted": bool(gone), "text_id": text_id}

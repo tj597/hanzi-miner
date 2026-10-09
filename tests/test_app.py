@@ -175,7 +175,7 @@ def test_library_lists_texts_and_single_text_loads():
     tid = lib["texts"][0]["id"]
     one = _j(client.get(f"/api/texts/{tid}"))
     assert one["body"].strip()
-    assert one["targets"], "a text should record the words mined from it"
+    assert one["lines"], "a text should expose per-line rows"
     assert client.get("/api/texts/999999").status_code == 404
 
 
@@ -296,6 +296,132 @@ def test_clean_caps_turns_and_dedupes_repeats():
     # a line repeated back-to-back (a model emitting the same turn twice) collapses
     dup = gen_mod._clean("小明：你好！\n小明：你好！\n小红：再见。", "小明", "小红")
     assert dup.count("小明：你好！") == 1, dup
+
+
+def test_prosody_rules_are_lossless_and_marked():
+    """The rule annotator must never alter the text it annotates."""
+    import prosody as pr
+
+    for s in ["你好！你今天怎么样？", "我去图书馆看书了。那里很安静。", "我买了苹果、香蕉和橘子。"]:
+        out = pr.rule_based(s)
+        assert pr._norm(out) == pr._norm(s), f"markers changed the text: {s!r} -> {out!r}"
+
+    out = pr.rule_based("你好！你今天怎么样？")
+    assert "//" in out and "↘" in out and "↗" in out, out
+    assert "/" in pr.rule_based("我买了苹果、香蕉和橘子。")
+    assert pr.rule_based("") == ""
+    assert pr.rule_based("今天很冷").endswith("↘"), "unpunctuated text still falls"
+
+    # stripping removes the long pause as ONE unit, not two short ones
+    assert pr.strip_markers("我去图书馆 // 看书了↘") == "我去图书馆看书了"
+
+
+def test_prosody_endpoint_annotates_every_line_without_changing_it():
+    lines = ["你好！你今天怎么样？", "我去图书馆看书了。那里很安静。"]
+    r = _j(client.post("/api/prosody", json={"lines": lines}))
+    assert len(r["annotated"]) == len(lines), r
+    assert r["annotator"] in ("model", "rule", "mixed"), r
+    import prosody as pr
+    for original, annotated in zip(lines, r["annotated"]):
+        # The guarantee is that the WORDS are untouched (the model may adjust
+        # punctuation to place a breath); the rule annotator is exactly lossless
+        # and is asserted separately.
+        assert pr.words_only(annotated) == pr.words_only(original), (original, annotated)
+        assert any(m in annotated for m in "/↗↘"), annotated
+    assert client.post("/api/prosody", json={"lines": []}).status_code == 400
+    assert client.post("/api/prosody", json={"lines": ["   "]}).status_code == 400
+
+
+def test_model_batch_discards_a_rewrite():
+    """If the model alters the text, the batch must be thrown away, not trusted."""
+    import requests as rq
+    import prosody as pr
+
+    class FakeResp:
+        status_code = 200
+
+        def __init__(self, content):
+            self._content = content
+
+        def json(self):
+            return {"choices": [{"message": {"content": self._content}}]}
+
+    def fake(content):
+        return lambda *a, **k: FakeResp(content)
+
+    lines = ["我去图书馆看书了。"]
+    original = rq.post
+    try:
+        rq.post = fake("我去图书馆看书了。↘//")               # faithful -> accepted
+        assert pr._model_batch(lines, 3) == ["我去图书馆看书了。↘//"]
+
+        rq.post = fake("我去图书馆读书了。↘//")               # rewritten -> rejected
+        assert pr._model_batch(lines, 3) is None
+
+        rq.post = fake("我去图书馆看书了。↘//\n多余的一行")     # wrong count -> rejected
+        assert pr._model_batch(lines, 3) is None
+
+        rq.post = fake("Let me think about the rhythm first.")  # reasoning -> rejected
+        assert pr._model_batch(lines, 3) is None
+
+        # Punctuation-level edits are TOLERATED on purpose: the model often adds a
+        # 、to mark a breath, which is the judgement being asked for. Reading the
+        # sentence aloud is unaffected, so only the words must survive.
+        rq.post = fake("我去图书馆、看书了。↘//")
+        assert pr._model_batch(lines, 3) == ["我去图书馆、看书了。↘//"]
+
+        # ...but dropping a word is not tolerated.
+        rq.post = fake("我去图书馆了。↘//")
+        assert pr._model_batch(lines, 3) is None
+    finally:
+        rq.post = original
+
+
+def test_annotate_lines_falls_back_to_rules_when_the_model_misbehaves():
+    import requests as rq
+    import prosody as pr
+
+    lines = ["你好！你今天怎么样？", "今天很冷"]
+    original = rq.post
+
+    def boom(*a, **k):
+        raise ConnectionError("inference unreachable")
+
+    try:
+        rq.post = boom
+        out = pr.annotate_lines(lines, level=3)
+    finally:
+        rq.post = original
+
+    assert out["annotator"] == "rule", out
+    assert len(out["annotated"]) == len(lines)
+    for line, annotated in zip(lines, out["annotated"]):
+        assert pr._norm(annotated) == pr._norm(line)
+
+
+def test_delete_text_keeps_the_words():
+    before = _j(client.get("/api/stats"))
+    # Same known-good sentence the delete-word test uses, so the i+1 filter is
+    # deterministic rather than depending on the size of the bank at this point.
+    text = "我喜欢学习中文语法。"
+    mined = _j(client.post("/api/mine", json={"text": text, "mode": "prose", "level": 3}))
+    assert mined["cards"], mined
+    saved = _j(client.post("/api/save", json={"text": text, "cards": mined["cards"],
+                                              "mode": "prose", "level": 3,
+                                              "title": "text-del-test"}))
+    tid = saved["text_id"]
+    mid = _j(client.get("/api/stats"))
+    assert mid["texts"] == before["texts"] + 1, (before, mid)
+
+    r = _j(client.post("/api/texts/delete", json={"id": tid}))
+    assert r["deleted"] and r["text_id"] == tid, r
+    after = _j(client.get("/api/stats"))
+    assert after["texts"] == before["texts"], "the text should be gone"
+    assert after["words"] == mid["words"], "deleting a text must not remove its words"
+
+    assert client.post("/api/texts/delete", json={"id": tid}).status_code == 404
+    assert client.post("/api/texts/delete", json={"id": "not-a-number"}).status_code == 400
+    assert client.post("/api/texts/delete", json={}).status_code == 400
 
 
 if __name__ == "__main__":

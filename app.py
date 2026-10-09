@@ -28,6 +28,7 @@ from flask import Flask, jsonify, render_template, request, send_file
 import db
 import deck as deck_mod
 import generate as gen_mod
+import prosody
 from known import build_known
 from miner import add_pinyin, mine
 from pinyin_util import to_pinyin
@@ -212,6 +213,44 @@ def api_text(text_id: int):
         return jsonify({"error": "not found"}), 404
     t["lines"] = _dialogue_lines(t["body"])
     return jsonify(t)
+
+
+@app.post("/api/texts/delete")
+def api_text_delete():
+    if not db.available():
+        return _no_db("The library")
+    payload = request.get_json(force=True, silent=True) or {}
+    try:
+        text_id = int(payload.get("id"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "no text id supplied"}), 400
+    try:
+        out = db.delete_text(text_id)
+    except Exception as exc:
+        return jsonify({"error": str(exc)[:300]}), 500
+    if not out["deleted"]:
+        return jsonify(out), 404
+    return jsonify({**out, "stats": db.stats()})
+
+
+@app.post("/api/prosody")
+def api_prosody():
+    """Annotate lines with pause and intonation marks for speaking practice."""
+    payload = request.get_json(force=True, silent=True) or {}
+    lines = payload.get("lines")
+    if lines is None:
+        text = payload.get("text") or ""
+        lines = text.splitlines()
+    if not isinstance(lines, list):
+        return jsonify({"error": "lines must be a list"}), 400
+    lines = [str(x) for x in lines]
+    if not any(ln.strip() for ln in lines if ln):
+        return jsonify({"error": "nothing to annotate"}), 400
+    try:
+        out = prosody.annotate_lines(lines, level=int(payload.get("level", 3) or 3))
+    except Exception as exc:
+        return jsonify({"error": str(exc)[:300]}), 500
+    return jsonify(out)
 
 
 # ------------------------------------------------------------------ review

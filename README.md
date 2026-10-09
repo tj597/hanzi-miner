@@ -153,9 +153,56 @@ python cli.py PATH --level {1..6} --mode {dialogue,prose}
 
 ## Deploy
 
-`.do/app.yaml` is a ready App Platform spec (single 0.5 GB instance, ~$5/mo,
-`tor` region). Point it at your repo and `doctl apps create --spec .do/app.yaml`.
-`cedict.txt` isn't in git, so add a build step or flip it into the repo first.
+`.do/app.yaml` is the App Platform **creation template**: one 0.5 GB instance in
+`tor` (~$5/mo) plus a dev PostgreSQL (512 MiB, $7/mo — no backups, no HA). Source is
+a public `git:` clone URL, which is what avoids needing a browser OAuth grant; the
+cost is that `git push` does not redeploy.
+
+```bash
+doctl apps create --spec .do/app.yaml
+# after the first deploy, do NOT reuse the template — it would wipe the secret:
+doctl apps spec get <app-id> > .do/app.live.yaml
+```
+
+Two gotchas that both look like success:
+
+- **A spec update reuses the previous build.** A generic `git:` source won't pick up
+  new commits from `apps update --spec`; the build reports `PreviousBuildReused` and
+  the app keeps running the old commit under a green `ACTIVE`/`HEALTHY`. Check
+  `source_commit_hash` against your HEAD and force a real one with
+  `POST /v2/apps/<id>/deployments {"force_build": true}`.
+- **A `SECRET` env var cannot live in a git-tracked file.** App Platform encrypts
+  the plaintext on first submit and returns an opaque `EV[...]` blob thereafter, so
+  re-submitting the template *deletes* the key. Always branch from the live spec.
+
+## Credentials
+
+The app needs exactly one secret: `DO_INFERENCE_KEY`, a DigitalOcean **Model Access
+Key** for dialogue generation. `DATABASE_URL` is bound to the app's database and
+managed by App Platform.
+
+**DigitalOcean retired programmatic creation of model access keys** — the API
+endpoint returns `410 Gone` ("Go to manage page in the control panel"), and the
+alternate path 404s. Minting is console-only:
+
+1. https://cloud.digitalocean.com/model-studio/manage-keys → create `hanzi-miner-app`
+2. Scope it to **only the models the app calls** (`qwen3.8-max`), not "All models"
+3. Hand it to the app without recording it anywhere:
+
+```bash
+read -rs DO_INFERENCE_KEY && export DO_INFERENCE_KEY   # -s keeps it out of history
+python scripts/set_app_key.py <app-id>
+unset DO_INFERENCE_KEY
+```
+
+`set_app_key.py` fingerprints the key, **tests it against the inference endpoint
+before repointing the app** (so a bad key can't take down a working deployment),
+then edits the live spec. `scripts/rotate_app_key.py` is the same thing with the
+create step attempted first, and it fails with a clear message on the retired
+endpoint.
+
+Use a key dedicated to this app rather than a shared one: you can revoke
+`hanzi-miner-app` in the console without touching anything else that uses inference.
 
 ## Roadmap
 

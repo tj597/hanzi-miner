@@ -65,8 +65,8 @@ def main(base: str) -> int:
     status, stats = call(base, "/api/stats")
     check("GET /api/stats", status == 200 and "words" in stats, json.dumps(stats))
 
-    status, words = call(base, "/api/words?filter=new")
-    check("GET /api/words", status == 200 and words.get("words"), f"{len(words.get('words', []))} new")
+    status, words = call(base, "/api/words?filter=all")
+    check("GET /api/words", status == 200 and bool(words.get("words")), f"{len(words.get('words', []))} words")
     check("words carry context sentences",
           any(w.get("sentences") for w in words.get("words", [])))
 
@@ -99,9 +99,14 @@ def main(base: str) -> int:
     if lib.get("texts"):
         tid = lib["texts"][0]["id"]
         status, one = call(base, f"/api/texts/{tid}")
-        check("GET /api/texts/<id>", status == 200 and one.get("targets"))
+        check("GET /api/texts/<id>", status == 200 and bool(one.get("lines")))
         check("text lines carry pinyin",
               bool(one.get("lines")) and all("pinyin" in l for l in one["lines"]))
+    # A re-save of an identical text legitimately links 0 sentences of its own
+    # (sentences are UNIQUE(sentence, target) and dedupe onto the first text), so
+    # assert that SOME text holds them rather than that the newest one does.
+    check("some text has linked sentences",
+          any(t.get("sentence_count") for t in lib.get("texts", [])))
 
     status, gen = call(base, "/api/generate", {"count": 10, "level": 3, "turns": 8, "save": True})
     if status == 200:

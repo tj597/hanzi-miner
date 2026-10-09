@@ -37,6 +37,11 @@ _LATIN_OR_DIGIT = re.compile(r"[A-Za-z0-9]")
 _LINE = re.compile(r"^\s*([^：:\n]{1,10})\s*[：:]\s*(\S.*?)\s*$")
 _TAGS = re.compile(r"<dialogue>(.*?)</dialogue>", re.S | re.I)
 
+# Models sometimes "correct themselves" mid-turn, leaving an edit marker inside a
+# speaker line. Seen in production: 小明：跟我还客气什么，==(改：跟我还客气什么，今晚请你吃饭。)
+# Latin/digit filtering does not catch it, because the marker is written in Chinese.
+_META = re.compile(r"==|＝=|（改|\(改|改：|注：|原文|\*\*|__|【改")
+
 
 def api_key() -> str:
     return os.environ.get("DO_INFERENCE_KEY", "").strip()
@@ -82,6 +87,8 @@ def _clean(raw: str, a: str, b: str, max_turns: int | None = None) -> str:
         if speaker not in (a, b):              # kills "Turn1：…" and all reasoning labels
             continue
         if _LATIN_OR_DIGIT.search(text):       # a Chinese turn has no latin letters or digits
+            continue
+        if _META.search(text):                 # self-correction / edit markers
             continue
         if not _CJK.search(text):
             continue

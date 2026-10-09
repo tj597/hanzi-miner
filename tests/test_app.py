@@ -264,6 +264,40 @@ def test_delete_word_removes_it_and_its_sentences():
     assert client.post("/api/words/delete", json={"word": ""}).status_code == 400
 
 
+def test_clean_drops_reasoning_and_self_corrections():
+    """generate._clean is pure — test it directly, no network needed.
+
+    Every rule here exists because a real generation leaked the thing it rejects.
+    """
+    import generate as gen_mod
+
+    raw = """<dialogue>
+Let me think about which HSK level 语法 belongs to. 语法 is HSK 4? Let me check.
+小明：跟我还客气什么，==(改：跟我还客气什么，今晚请你吃饭。)
+小红：好啊，那我就不客气了！
+小明：Turn1：这行是推理过程，不该保留。
+小红：   明天见！
+</dialogue>
+trailing prose outside the tags 也应该被忽略"""
+    got = gen_mod._clean(raw, "小明", "小红", max_turns=10)
+    assert got == "小红：好啊，那我就不客气了！\n小红：明天见！", repr(got)
+
+
+def test_clean_caps_turns_and_dedupes_repeats():
+    import generate as gen_mod
+
+    # Chinese numerals, not 1..8: Arabic digits are rejected by design, so a test
+    # using them would silently assert against an empty result.
+    cn = "一二三四五六七八"
+    body = "\n".join(f"小明：这是第{c}句话，测试用的。" for c in cn)
+    out = gen_mod._clean(body + "\n" + body, "小明", "小红", max_turns=5)
+    assert len(out.splitlines()) == 5, out
+
+    # a line repeated back-to-back (a model emitting the same turn twice) collapses
+    dup = gen_mod._clean("小明：你好！\n小明：你好！\n小红：再见。", "小明", "小红")
+    assert dup.count("小明：你好！") == 1, dup
+
+
 if __name__ == "__main__":
     seed()
     print(f"seeded: {len(SEED['words'])} words -> {SEED['words']}\n")

@@ -203,6 +203,9 @@ Two gotchas that both look like success:
 - **A `SECRET` env var cannot live in a git-tracked file.** App Platform encrypts
   the plaintext on first submit and returns an opaque `EV[...]` blob thereafter, so
   re-submitting the template *deletes* the key. Always branch from the live spec.
+- **An `EV[...]` blob is not portable across apps, and a dev database dies with
+  the app.** Deleting and recreating the app means re-entering the key (console or
+  `set_app_key.py`) and losing the SRS schedule; export texts first.
 
 ## Credentials
 

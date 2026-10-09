@@ -50,7 +50,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import configure_app  # noqa: E402  (one place owns the spec-edit logic)
 from rotate_app_key import fingerprint, probe  # noqa: E402
 
-DEFAULT_APP_ID = "e5d0d85c-5824-4b44-82d8-a541314b7989"
+DEFAULT_APP_ID = "956b5b55-c550-46aa-88f0-de4e8f35e26c"
 
 
 def get_key() -> str:

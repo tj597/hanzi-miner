@@ -1,0 +1,21 @@
+# DigitalOcean App Platform spec.
+# Create the app from a repo/CLI with this spec:
+#   doctl apps create --spec .do/app.yaml
+# or paste it into the App Platform UI ("Edit your app spec").
+name: hanzi-miner
+region: tor
+services:
+  - name: web
+    github:
+      repo: tj597/hanzi-miner
+      branch: main
+      deploy_on_push: true
+    environment_slug: python
+    instance_size_slug: apps-s-1vcpu-0.5gb
+    instance_count: 1
+    http_port: 8080
+    build_command: ./scripts/fetch_data.sh && pip install -r requirements.txt
+    run_command: gunicorn app:app --bind 0.0.0.0:8080 --workers 1 --threads 4 --timeout 120
+    envs:
+      - key: PYTHONUNBUFFERED
+        value: "1"

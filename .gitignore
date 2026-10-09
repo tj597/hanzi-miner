@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+*.apkg
+.DS_Store
+
+# Large dictionary — fetch with scripts/fetch_data.sh, don't commit.
+data/cedict.txt
+data/cedict.txt.gz

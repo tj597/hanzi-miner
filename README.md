@@ -1,0 +1,124 @@
+# Hanzi Miner
+
+Paste Chinese text → get **i+1 flashcards**: sentences where you understand every
+word except exactly one. That single unknown word is guessable from context,
+which is the condition under which vocabulary actually sticks (Krashen's
+comprehensible input).
+
+Clipboard in, Anki deck out. No app to install, no account.
+
+```
+paste dialogue →  clean + segment → keep units with exactly 1 unknown word
+              → dedupe (one card per word) → rank → .apkg
+```
+
+## Quick start
+
+```bash
+git clone <this repo> && cd hanzi-miner
+./scripts/fetch_data.sh          # downloads CC-CEDICT + HSK lists (once)
+python3 -m venv .venv && . .venv/bin/activate
+pip install -r requirements.txt
+python app.py                    # http://127.0.0.1:8080
+```
+
+Or use it from the terminal:
+
+```bash
+python cli.py samples/dialogue_office.txt --level 3 --mode dialogue
+cat article.txt | python cli.py - --level 4 --mode prose --max-unknown 1
+```
+
+## What it does, in detail
+
+1. **Clean.** Strips subtitle timestamps (`00:01:23,000`), speaker labels
+   (`小明：`, `A:`, `Speaker 1:`), HTML entities and pure-English lines.
+2. **Segment.** Chinese has no spaces, so word boundaries come from [jieba].
+3. **Filter to i+1.** Keep only units containing *exactly one* word outside your
+   known-set. `max_unknown=2` relaxes this when you're just starting.
+4. **Mine dialogue by exchange, not by line.** Short lines (`好。`) carry no
+   context, so the miner also evaluates 2-line windows and keeps whichever window
+   has exactly one unknown — that's what makes the word guessable.
+5. **Dedupe.** One card per target word, preferring the shortest, cleanest unit.
+6. **Rank.** Genuinely-new words first, then the words this particular text leans
+   on (so the deck matches what you're actually reading), then real dictionary
+   words, then shorter cards.
+7. **Enrich + export.** CC-CEDICT definitions, pypinyin tone-marked readings, and
+   a ready-to-import Anki `.apkg` (no add-ons needed). Re-imports update the same
+   deck instead of duplicating cards.
+
+## The part that actually matters: your known-set
+
+Everything depends on knowing what you already know. Get this wrong and you get
+junk cards. The miner assembles the known-set from three sources:
+
+| Source | What it is | Why |
+|---|---|---|
+| HSK 1–6 (`data/hsk_L*.txt`) | ~5000 words, pedagogically ordered | sets your baseline level |
+| Frequency list (`data/freq_zh.txt`) | top 5000 Chinese words | **fills gaps in the HSK export** |
+| `--extra-known` / the textarea | your own list (Anki export, etc.) | always the best signal |
+
+The frequency list is not optional in practice: the HSK 2.0 export omits common
+function words (`没`, rank 82) and greetings (`你好`), which otherwise show up as
+false "unknown" words on every card. Merging frequency + HSK fixes that.
+
+**Complex forms.** `你好`, `有意思`, `看书` are single jieba tokens whose
+characters you already know, so a word-list check calls them "unknown". They are
+demoted (flagged `complex form`) rather than dropped — dropping them would also
+silently kill real targets like `语法` (`语` + `法` are both known words).
+
+**If results look wrong**, the known-set is almost always why. Fixes, in order:
+paste your Anki export into the extra-known box → lower/raise the level → try
+`--max-unknown 2`.
+
+## CLI reference
+
+```
+python cli.py PATH --level {1..6} --mode {dialogue,prose}
+                   --max-unknown N --window N --extra-known "词1,词2"
+                   --limit N --no-pinyin
+```
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--level` | 2 | HSK 1–N plus top-N×500 frequent words = known |
+| `--mode` | dialogue | `dialogue` mines across turns; `prose` per sentence |
+| `--max-unknown` | 1 | how many new words a card may contain |
+| `--window` | 2 | dialogue turns merged per unit |
+| `--extra-known` | — | words to add to the known-set |
+
+## Data / offline use
+
+`scripts/fetch_data.sh` downloads CC-CEDICT (CC BY-SA 4.0) and the HSK lists.
+`data/freq_zh.txt` was generated once with the [`wordfreq`][wordfreq] package
+(`top_n_list('zh', 20000)`, filtered to pure-CJK tokens) and committed, so
+`wordfreq` is *not* a runtime dependency — the app ships the list.
+
+`data/cedict.txt` is ~10 MB and is gitignored; the App Platform build must run
+`scripts/fetch_data.sh` (or commit the file) before first boot.
+
+## Deploy
+
+`.do/app.yaml` is a ready App Platform spec (single 0.5 GB instance, ~$5/mo,
+`tor` region). Point it at your repo and `doctl apps create --spec .do/app.yaml`.
+`cedict.txt` isn't in git, so add a build step or flip it into the repo first.
+
+## Roadmap
+
+- [ ] Photo input — iOS Shortcut (on-device Live Text) → same `/api/mine`
+- [ ] `.srt` ingestion with subtitle-line reassembly
+- [ ] Sentence audio via TTS (DigitalOcean serverless inference) stored in Spaces
+- [ ] read back which words you've since learned → auto-advance difficulty
+
+## Credits
+
+- [CC-CEDICT][cedict] dictionary (CC BY-SA 4.0)
+- HSK 2.0 word lists via [hskhsk.com][hsk]
+- [jieba] for Chinese segmentation, [genanki] for Anki export, [pypinyin] for readings
+
+[cedict]: https://www.mdbg.net/chinese/dictionary?page=cc-cedict
+[hsk]: https://github.com/glxxyz/hskhsk.com
+[jieba]: https://github.com/fxsjy/jieba
+[genanki]: https://github.com/kerrickstaley/genanki
+[pypinyin]: https://github.com/mozillazg/python-pinyin
+[wordfreq]: https://github.com/rspeer/wordfreq

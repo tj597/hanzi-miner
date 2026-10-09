@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hanzi Miner — i+1 sentence miner</title>
+<style>
+  :root{
+    --bg:#0f1216; --panel:#171b21; --line:#2a313a; --fg:#e6e9ee;
+    --muted:#8b95a3; --accent:#e2604a; --ok:#4ea87a;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  header{padding:22px 20px 8px;max-width:860px;margin:0 auto}
+  h1{margin:0 0 4px;font-size:20px}
+  header p{margin:0;color:var(--muted);font-size:13px}
+  main{max-width:860px;margin:0 auto;padding:12px 20px 60px}
+  textarea,input,select{width:100%;background:var(--panel);color:var(--fg);
+       border:1px solid var(--line);border-radius:8px;padding:10px;font:inherit}
+  textarea{min-height:220px;resize:vertical;font-size:15px}
+  .row{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}
+  .row > div{flex:1;min-width:130px}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
+  button{background:var(--accent);color:#fff;border:0;border-radius:8px;
+       padding:11px 18px;font-size:15px;font-weight:600;cursor:pointer}
+  button.secondary{background:var(--panel);border:1px solid var(--line);color:var(--fg)}
+  button:disabled{opacity:.5;cursor:default}
+  #stats{color:var(--muted);font-size:13px;margin:16px 0 8px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+       padding:14px 16px;margin-bottom:10px}
+  .sent{font-size:21px;line-height:1.6}
+  .sent b{color:var(--accent)}
+  .meta{margin-top:6px;color:var(--muted);font-size:13px}
+  .py{margin-top:2px;color:#6f7a88;font-size:13px}
+  .empty{color:var(--muted);padding:20px 0;text-align:center}
+</style>
+</head>
+<body>
+<header>
+  <h1>Hanzi Miner</h1>
+  <p>Paste Chinese → keep only sentences with exactly one word you don't know → export an Anki deck.</p>
+</header>
+<main>
+  <textarea id="text" placeholder="Paste dialogue or prose here (Chinese, with punctuation).
+
+小明：你今天去哪儿了？
+小红：我去图书馆看书了。"></textarea>
+
+  <div class="row">
+    <div>
+      <label>Input type</label>
+      <select id="mode">
+        <option value="dialogue">Dialogue (mine across turns)</option>
+        <option value="prose">Prose (mine per sentence)</option>
+      </select>
+    </div>
+    <div>
+      <label>Words I already know</label>
+      <select id="level">
+        <option value="1">HSK 1</option>
+        <option value="2" selected>HSK 1–2</option>
+        <option value="3">HSK 1–3</option>
+        <option value="4">HSK 1–4</option>
+        <option value="5">HSK 1–5</option>
+        <option value="6">HSK 1–6</option>
+      </select>
+    </div>
+    <div>
+      <label>New words per card</label>
+      <select id="max_unknown">
+        <option value="1" selected>Exactly 1 (true i+1)</option>
+        <option value="2">Up to 2</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="row">
+    <div style="flex:3">
+      <label>Extra known words (optional — paste from Anki, one per line or comma-separated)</label>
+      <textarea id="extra_known" style="min-height:60px"></textarea>
+    </div>
+  </div>
+
+  <div class="row">
+    <button id="mineBtn">Mine</button>
+    <button id="deckBtn" class="secondary" disabled>Download Anki deck</button>
+  </div>
+
+  <div id="stats"></div>
+  <div id="results"></div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let lastCards = [];
+
+function body(){
+  return {
+    text: $("text").value,
+    mode: $("mode").value,
+    level: $("level").value,
+    max_unknown: $("max_unknown").value,
+    extra_known: $("extra_known").value,
+  };
+}
+
+function render(r){
+  const s = r.stats;
+  $("stats").textContent =
+    `${s.lines} lines → ${s.units} units → ${s.candidates} matched → ${s.mined} cards`;
+  const box = $("results");
+  if(!r.cards.length){
+    box.innerHTML = '<div class="empty">No i+1 sentences found. Either the text is all-known, ' +
+      'or every unit has 2+ unknown words — try lowering your known level, or switch to "Up to 2".</div>';
+    $("deckBtn").disabled = true;
+    return;
+  }
+  box.innerHTML = r.cards.map((c,i)=>{
+    const sent = c.sentence.replace(c.target, `<b>${c.target}</b>`);
+    const defs = (c.defs && c.defs.length) ? c.defs.slice(0,3).join("; ") : "(no dictionary entry)";
+    return `<div class="card">
+      <div class="sent">${sent}</div>
+      <div class="meta">${c.target} · ${c.target_pinyin||""} — ${defs}</div>
+      ${c.sentence_pinyin ? `<div class="py">${c.sentence_pinyin}</div>` : ""}
+    </div>`;
+  }).join("");
+  $("deckBtn").disabled = false;
+}
+
+async function mineNow(){
+  $("mineBtn").disabled = true;
+  $("stats").textContent = "Mining…";
+  try{
+    const res = await fetch("/api/mine", {method:"POST",
+      headers:{"Content-Type":"application/json"}, body: JSON.stringify(body())});
+    const r = await res.json();
+    lastCards = r.cards || [];
+    render(r);
+  }catch(e){ $("stats").textContent = "Error: " + e; }
+  $("mineBtn").disabled = false;
+}
+
+async function downloadDeck(){
+  $("deckBtn").disabled = true;
+  try{
+    const res = await fetch("/api/deck", {method:"POST",
+      headers:{"Content-Type":"application/json"}, body: JSON.stringify(body())});
+    if(!res.ok){ alert("No cards to export."); }
+    else{
+      const blob = await res.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "Hanzi Miner.apkg";
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }
+  }catch(e){ alert("Error: " + e); }
+  $("deckBtn").disabled = false;
+}
+
+$("mineBtn").addEventListener("click", mineNow);
+$("deckBtn").addEventListener("click", downloadDeck);
+</script>
+</body>
+</html>
